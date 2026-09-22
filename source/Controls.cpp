@@ -43,6 +43,50 @@ const char* MaskModeName( MaskMode mode )
 	}
 }
 
+const char* SourceOutputName( SourceOutput mode )
+{
+	switch( mode )
+	{
+	case SourceOutput::Normal:       return "Over";
+	case SourceOutput::Matte:        return "Matte";
+	case SourceOutput::InverseMatte: return "Inverse Matte";
+	default:                         return "Over";
+	}
+}
+
+const char* LanesName( Lanes lanes )
+{
+	switch( lanes )
+	{
+	case Lanes::Off:    return "Off";
+	case Lanes::Step:   return "Step";
+	case Lanes::Random: return "Random";
+	default:            return "Off";
+	}
+}
+
+const char* ImageSourceName( ImageSource source )
+{
+	switch( source )
+	{
+	case ImageSource::Single: return "Single";
+	case ImageSource::Folder: return "Folder";
+	case ImageSource::Sheet:  return "Sprite Sheet";
+	default:                  return "Single";
+	}
+}
+
+const char* ImagePickName( ImagePick pick )
+{
+	switch( pick )
+	{
+	case ImagePick::Same:    return "Same";
+	case ImagePick::Random:  return "Random";
+	case ImagePick::InOrder: return "In Order";
+	default:                 return "Same";
+	}
+}
+
 const char* SyncName( Sync sync )
 {
 	switch( sync )
@@ -126,6 +170,25 @@ float AcrossFromParam( float value )
 }
 
 float HueSpreadFromParam( float value )
+{
+	return Clamp01( value );
+}
+
+float LaneStepFromParam( float value )
+{
+	// Linear and centred: 0.5 is exactly 0 in binary floating point, so "no
+	// step" is a place the slider can be trusted to reach. Half the frame each
+	// way is the whole useful range, because the lanes wrap — a step of 0.7 is
+	// the same picture as a step of -0.3.
+	return Clamp01( value ) - 0.5f;
+}
+
+float ShadowDistanceFromParam( float value )
+{
+	return Clamp01( value );
+}
+
+float ShadowBlurFromParam( float value )
 {
 	return Clamp01( value );
 }

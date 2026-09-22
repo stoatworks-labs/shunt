@@ -11,7 +11,10 @@
        the effect is mixed out.
     2. **Shapes.** One instanced quad per shape in the train, sized by the
        shape's own bound and placed by the `Xform` uniform array that
-       `Queue.cpp` filled.
+       `Queue.cpp` filled. With a drop shadow on there are two instances per
+       shape — its shadow, then itself — so each shadow lands on the older
+       shapes and never on its own. `Cell` is each shape's rectangle of the
+       Image, sampled on texture unit 1.
 
     Every mode — including the effect's Reveal and Hide, which look like they
     need a mask buffer — is reachable with those two passes and a blend

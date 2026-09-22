@@ -35,9 +35,9 @@ static CFFGLPluginInfo PluginInfo(
 	2,                                                  // API major version number
 	1,                                                  // API minor version number
 	0,                                                  // Plugin major version number
-	1,                                                  // Plugin minor version number
+	2,                                                  // Plugin minor version number
 	FF_SOURCE,                                          // Plugin type
-	"Shapes slide in from an edge, bank up a set distance apart, stand, and are drawn away.\n\nFor animated masks and for chroma animations driving a pixel map. Gap can be set in multiples of the shape's own thickness or in absolute pixels.\n\nDwell is the one dial: turn it down and the front of the queue is still leaving as the back arrives; turn it up and the whole train stands before anything moves.\n\nStart from a Preset, at the bottom.",// Plugin description
+	"Shapes slide in from an edge, bank up a set distance apart, stand, and are drawn away.\n\nFor animated masks and for chroma animations driving a pixel map. Gap can be set in multiples of the shape's own thickness or in absolute pixels.\n\nDwell is the one dial: turn it down and the front of the queue is still leaving as the back arrives; turn it up and the whole train stands before anything moves.\n\nMask Mode draws a matte: white or black shapes for another layer to key against. Lanes, Shadow and Image are below the Preset: a new line for each set, drop shadows, and a picture, a folder or a sprite sheet on the shapes.\n\nStart from a Preset.",// Plugin description
 	"Shunt FFGL source"                                 // About
 );
 

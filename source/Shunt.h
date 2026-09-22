@@ -5,9 +5,12 @@
 // After FFGLSDK.h, which is where FFUInt32 comes from.
 #include "StoatworksAboutParams.h"
 
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "Controls.h"
+#include "Imagery.h"
 #include "Presets.h"
 #include "Queue.h"
 #include "Shapes.h"
@@ -92,6 +95,13 @@ public:
 	/// slider look dead to a sweep.
 	void SetPhaseOverride( float phase );
 
+	/// What the last attempt to load the Image said -- the same line Diag
+	/// logs. Empty until an image has been asked for.
+	std::string ImageNoteForTest() const { return imageNote; }
+
+	/// How many cells the loaded image has; 0 when none is loaded.
+	int ImageCellsForTest() const { return imageTexture != 0 ? static_cast< int >( imageCells.size() ) : 0; }
+
 private:
 	/// The ParamId each presets::Param drives, in presets::Param order. The
 	/// preset table stays host-agnostic; this is the FFGL binding of it.
@@ -138,6 +148,43 @@ private:
 	bool hostValuesSeeded        = false;
 
 	bool BuildShaders();
+
+	/// The source's reading of Mask Mode; Normal for the effect.
+	SourceOutput CurrentSourceOutput() const;
+
+	/// The blend actually used: the operator's, except that a matte is Over.
+	Blend CurrentBlend() const;
+
+	/// True when the source's Mix is applied as a constant blend factor over
+	/// the whole composite rather than folded into the shapes' alpha. See
+	/// ApplyBlend in Shunt.cpp.
+	bool SourceFadesInBlend() const;
+
+	//---------------------------------------------------------------------
+	// The Image.
+	//
+	// The path arrives through SetTextParameter, which a host may call from a
+	// thread that is not the render thread, so it is held under a mutex and
+	// only ever READ on the render thread -- which is also the only place the
+	// decode and the upload happen, because the upload needs the GL context.
+	//
+	// What was last loaded is remembered as a key (path, source, grid), and
+	// the image is reloaded only when the key changes. Columns and Rows are in
+	// the key only for a sheet: they mean nothing to a single image or a
+	// folder, and dragging them should not reload a folder of 36 photos.
+	//---------------------------------------------------------------------
+	void UpdateImage();
+	void ReleaseImage();
+
+	mutable std::mutex textMutex;
+	std::string imagePath;         ///< as the host last set it
+	std::string imagePathReturn;   ///< what GetTextParameter hands back
+
+	std::string loadedKey;         ///< empty: nothing loaded, or not yet tried
+	std::string imageNote;
+	GLuint imageTexture       = 0;
+	GLuint placeholderTexture = 0;  ///< one white texel, for while there is no image
+	std::vector< ImageCell > imageCells;
 
 	/// Phase, in cycles, for the current parameters and host state.
 	float CurrentPhase() const;
@@ -230,9 +277,10 @@ private:
 	std::vector< Wagon > wagons;
 
 	/// Scratch for the uniform upload, kept as a member so that a frame does not
-	/// allocate. Xform and Tint, kMaxShapes of each.
+	/// allocate. Xform, Tint and Cell, kMaxShapes of each.
 	std::vector< float > xformScratch;
 	std::vector< float > tintScratch;
+	std::vector< float > cellScratch;
 };
 
 } // namespace shunt

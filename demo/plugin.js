@@ -86,27 +86,53 @@ const SHAPE_VERTEX_SHADER = `#version 410 core
 
 uniform vec4 Xform[ 64 ];   // centre.xy in frame space, radius, rotation
 uniform vec4 Tint[ 64 ];    // rgb, alpha
+uniform vec4 Cell[ 64 ];    // the shape's image rectangle: u0, v0, u1, v1
 uniform vec2 Resolution;
 uniform float Bound;
 uniform float Stretch;
 
+// Drop shadows ride in the same instanced draw as the shapes they belong to.
+// With ShadowPass on there are TWO instances per shape -- its shadow, then the
+// shape -- so each shadow is drawn after every older shape and before its own:
+// it falls on the shapes it has slid over and never on itself. Two draws, all
+// shadows then all shapes, would put every shadow under every shape and the
+// overlap the whole plugin is about would lose its depth.
+uniform int ShadowPass;
+uniform vec2 ShadowOffset;  // in shape radii, on SCREEN, y down
+uniform float ShadowBlur;   // in shape radii
+
 out vec2 vLocal;
 out vec4 vTint;
 out vec2 vClipUV;
+out vec4 vCell;
+out float vShadow;
+out float vRotation;
 
 void main()
 {
 	vec2 c = vec2( ( gl_VertexID & 1 ) == 0 ? -1.0 : 1.0,
 	               ( gl_VertexID & 2 ) == 0 ? -1.0 : 1.0 );
 
-	vec4 xf = Xform[ gl_InstanceID ];
-	vTint   = Tint[ gl_InstanceID ];
+	int index    = gl_InstanceID;
+	float shadow = 0.0;
+	if( ShadowPass == 1 )
+	{
+		index  = gl_InstanceID / 2;
+		shadow = ( gl_InstanceID % 2 ) == 0 ? 1.0 : 0.0;
+	}
+
+	vec4 xf   = Xform[ index ];
+	vTint     = Tint[ index ];
+	vCell     = Cell[ index ];
+	vShadow   = shadow;
+	vRotation = xf.w;
 
 	// Shape space: the primitive has unit radius and Stretch widens it on x.
 	// The quad has to cover the stretched, rounded, outlined, feathered shape,
-	// which is what Bound already accounts for.
-	vec2 local = c * vec2( Bound * Stretch, Bound );
-	vLocal     = local;
+	// which is what Bound already accounts for -- and a shadow's blur on top.
+	float reach = Bound + shadow * ShadowBlur;
+	vec2 local  = c * vec2( reach * Stretch, reach );
+	vLocal      = local;
 
 	float ca     = cos( xf.w );
 	float sa     = sin( xf.w );
@@ -123,7 +149,9 @@ void main()
 	                 ? vec2( Resolution.y / Resolution.x, 1.0 )
 	                 : vec2( 1.0, Resolution.x / Resolution.y );
 
-	vec2 framePos = xf.xy + rotated * xf.z * shortEdge;
+	// The shadow's offset is added AFTER the rotation: the light is fixed on
+	// the screen, so a shape turning does not swing its shadow round with it.
+	vec2 framePos = xf.xy + ( rotated + shadow * ShadowOffset ) * xf.z * shortEdge;
 
 	// The clip UV is carried from here rather than recovered from gl_FragCoord
 	// in the fragment shader, because gl_FragCoord is in window coordinates and
@@ -140,6 +168,9 @@ const SHAPE_FRAGMENT_SHADER = `#version 410 core
 in vec2 vLocal;
 in vec4 vTint;
 in vec2 vClipUV;
+in vec4 vCell;
+in float vShadow;
+in float vRotation;
 
 uniform int ShapeKind;
 uniform float Stretch;
@@ -149,6 +180,27 @@ uniform float Softness;
 uniform float Shade;
 uniform float LightAngle;
 uniform int SampleMode;
+
+// The picture on the shapes. One texture whatever it came from -- a file, a
+// folder packed into a grid, a sprite sheet -- and a rectangle per shape in
+// vCell. Straight alpha.
+uniform sampler2D Imagery;
+uniform int HasImage;
+uniform float ImageMix;
+
+// The entry side's rotation, in radians. The image turns with Angle but not
+// with the side the train comes in from: shape space is rotated to face the
+// direction of travel, and a picture of a face should not lie on its side
+// because the train now falls from the top.
+uniform float SideTurn;
+
+uniform float ShadowAmount;
+uniform float ShadowBlur;
+
+// 0: the shapes' own colours. 1: white, for a matte. 2: black, for an inverse
+// matte. Coverage, opacity and the image's alpha all still apply -- only the
+// colour is replaced -- so a soft edge is a soft edge in the matte too.
+uniform int Matte;
 
 #ifdef SHUNT_EFFECT
 uniform sampler2D Clip;
@@ -293,14 +345,55 @@ void main()
 
 	float d = ( Outline > 0.001 ) ? abs( d0 ) - Outline * 0.5 : d0;
 
-	float feather  = max( aa, Softness * 2.0 );
+	bool isShadow = vShadow > 0.5;
+
+	// A shadow is the same silhouette with a wider feather: the blur spreads it
+	// by ShadowBlur either side of the edge, which is what the quad was grown
+	// by in the vertex shader.
+	float feather  = isShadow ? max( max( aa, Softness * 2.0 ), ShadowBlur * 2.0 )
+	                          : max( aa, Softness * 2.0 );
 	float coverage = 1.0 - smoothstep( -feather * 0.5, feather * 0.5, d );
 
 	if( coverage <= 0.0 )
 		discard;
 
+	//-----------------------------------------------------------------------
+	// The picture. Shape space is y-down with unit radius, so the square
+	// (-1..1) maps onto the cell with its top row at the top of the shape.
+	// Clamped to the cell, because the quad is bigger than the square -- for
+	// the rounding, the outline and the feather -- and past its edge the cell
+	// has neighbours.
+	//-----------------------------------------------------------------------
+	vec4 image = vec4( 1.0 );
+	if( HasImage == 1 )
+	{
+		vec2 p   = vLocal / st;
+		float cs = cos( SideTurn );
+		float sn = sin( SideTurn );
+		vec2 q   = vec2( p.x * cs - p.y * sn, p.x * sn + p.y * cs );
+		vec2 t   = clamp( q * 0.5 + 0.5, 0.0, 1.0 );
+		image    = texture( Imagery, mix( vCell.xy, vCell.zw, t ) );
+	}
+
+	float imageAlpha = ( HasImage == 1 ) ? mix( 1.0, image.a, ImageMix ) : 1.0;
+
+	if( isShadow )
+	{
+		// Black, at the shape's own opacity and the picture's alpha, so a sprite
+		// with a transparent surround casts the sprite's shadow and not the
+		// square's.
+		float shadowAlpha = coverage * vTint.a * imageAlpha * ShadowAmount;
+		if( shadowAlpha <= 0.0 )
+			discard;
+		fragColor = vec4( 0.0, 0.0, 0.0, shadowAlpha );
+		return;
+	}
+
 	vec3 rgb    = vTint.rgb;
-	float alpha = coverage * vTint.a;
+	float alpha = coverage * vTint.a * imageAlpha;
+
+	if( HasImage == 1 )
+		rgb = mix( vTint.rgb, image.rgb * vTint.rgb, ImageMix );
 
 #ifdef SHUNT_EFFECT
 	// 1 = Reveal (the clip, cut to the shapes), 2 = Colourise (the clip tinted).
@@ -331,7 +424,12 @@ void main()
 	// segments sliding over one another is what makes the overlap read as depth
 	// rather than as two flat shapes on top of each other.
 	//-----------------------------------------------------------------------
-	if( Shade > 0.001 )
+	if( Matte == 1 )
+		rgb = vec3( 1.0 );
+	else if( Matte == 2 )
+		rgb = vec3( 0.0 );
+
+	if( Shade > 0.001 && Matte == 0 )
 	{
 		// Central differences rather than fwidth: a screen-space derivative is
 		// one value per 2x2 quad, and these shapes are deliberately small, so
@@ -355,11 +453,22 @@ void main()
 
 		vec3 normal = vec3( outward * s, sqrt( max( 0.0, 1.0 - s * s ) ) );
 
+		// The light is fixed on the SCREEN, so it is turned back into shape
+		// space by the shape's own rotation. Up to 0.1.0 it was not, and the
+		// highlight swung round with Angle and with the entry side -- a train
+		// falling from the top was lit from the side -- which a drop shadow cast
+		// from the same Light control would have made obvious.
+		//
 		// The y flip is because shape space runs y-down to match frame space:
 		// without it, raising the Light control walks the highlight the wrong
 		// way round the shape.
-		float a     = LightAngle * 6.28318531;
-		vec3 toLight = normalize( vec3( cos( a ), -sin( a ), 0.65 ) );
+		float a      = LightAngle * 6.28318531;
+		vec2 screenL = vec2( cos( a ), -sin( a ) );
+		float cr     = cos( vRotation );
+		float sr     = sin( vRotation );
+		vec2 localL  = vec2( screenL.x * cr + screenL.y * sr,
+		                     -screenL.x * sr + screenL.y * cr );
+		vec3 toLight = normalize( vec3( localL, 0.65 ) );
 
 		float lambert = max( dot( normal, toLight ), 0.0 );
 		// Not \`half\`: that is a reserved word in GLSL and the compiler's
@@ -400,7 +509,18 @@ const GAP_UNIT_NAMES = ['Thickness', 'Pixels'];
 const SYNC_NAMES = ['Free', 'Beat', 'Bar', 'Manual'];
 const COLOUR_MODE_NAMES = ['White', 'Solid', 'Hue Spread', 'Hue Cycle'];
 const BLEND_NAMES = ['Over', 'Add', 'Max'];
-const MASK_MODE_NAMES = ['Over', 'Reveal', 'Hide', 'Colourise'];
+// One list for both bundles, because the panel's elements are fixed: the
+// plugin declares Over / Reveal / Hide / Colourise on the effect and Over /
+// Matte / Inverse Matte on the source, with the values lined up so that the
+// same element means the corresponding thing in each. Colourise on the source
+// clamps to Inverse Matte, exactly as a composition moved across would.
+const MASK_MODE_NAMES = ['Over', 'Reveal · Matte', 'Hide · Inverse Matte', 'Colourise'];
+const LANES_NAMES = ['Off', 'Step', 'Random'];
+const IMAGE_NAMES = ['None', 'The clip'];
+const IMAGE_SOURCE_NAMES = ['Single', 'Folder', 'Sprite Sheet'];
+const IMAGE_PICK_NAMES = ['Same', 'Random', 'In Order'];
+const MAX_GRID = 16;
+const MAX_SPRITE = 255;
 
 const MAX_SHAPES = 64;
 const CLEARANCE = 0.02;
@@ -451,6 +571,14 @@ const gapFromParam = (v, pixels) => (pixels ? clamp01(v) * 512 : clamp01(v) * 4)
 const dwellFromParam = (v) => clamp01(v) * 0.95;
 const acrossFromParam = (v) => clamp01(v) * 1.5 - 0.25;
 const hueSpreadFromParam = (v) => clamp01(v);
+const laneStepFromParam = (v) => clamp01(v) - 0.5;
+const shadowDistanceFromParam = (v) => clamp01(v);
+const shadowBlurFromParam = (v) => clamp01(v);
+
+// The plugin declares these three as FF_TYPE_INTEGER with real ranges; this
+// page's kit only has 0..1 sliders, so it maps them and shows the integer.
+const columnsFromParam = (v) => 1 + Math.round(clamp01(v) * (MAX_GRID - 1));
+const spriteFromParam = (v) => Math.round(clamp01(v) * MAX_SPRITE);
 
 function speedFromParam(value) {
   const v = clamp01(value);
@@ -476,15 +604,16 @@ function frameRadius(scale, aspect) {
 /** The shape's rotation on screen: the direction of travel plus whatever Angle
  *  adds. Measuring Angle from the travel direction is what makes a Bar behave
  *  the same way whichever edge the train comes in from. */
+const sideRotation = (side) => [0, Math.PI, Math.PI / 2, -Math.PI / 2][side] ?? 0;
+
 function screenRotation(p) {
-  const base = [0, Math.PI, Math.PI / 2, -Math.PI / 2][p.side] ?? 0;
-  return base + p.angle * Math.PI * 2;
+  return sideRotation(p.side) + p.angle * Math.PI * 2;
 }
 
-/** Half the shape's extent along the direction of travel, in frame-span units.
+/** The rotated box's half extents on the frame's two axes, in frame-span units.
  *  The support function of a rotated box: rotation happens in shape space and
  *  the anisotropic frame scaling comes after it. */
-function halfThickness(p) {
+function rotatedHalfExtents(p) {
   const [ex, ey] = shapeHalfExtents(p.shape);
   const hx = ex * Math.max(0, p.stretch);
   const hy = ey;
@@ -494,7 +623,77 @@ function halfThickness(p) {
   const s = Math.abs(Math.sin(theta));
 
   const [rx, ry] = frameRadius(p.size, p.aspect);
-  return travelsHorizontally(p.side) ? rx * (hx * c + hy * s) : ry * (hx * s + hy * c);
+  return [rx * (hx * c + hy * s), ry * (hx * s + hy * c)];
+}
+
+/** Half the shape's extent along the direction of travel. */
+function halfThickness(p) {
+  const [onX, onY] = rotatedHalfExtents(p);
+  return travelsHorizontally(p.side) ? onX : onY;
+}
+
+/** Half the shape's extent ACROSS the direction of travel. */
+function crossHalfThickness(p) {
+  const [onX, onY] = rotatedHalfExtents(p);
+  return travelsHorizontally(p.side) ? onY : onX;
+}
+
+/** splitmix64's finaliser, in BigInt so it is bit-for-bit the plugin's. A
+ *  set's random lane is a pure function of its number. */
+const MASK64 = (1n << 64n) - 1n;
+function hash01(n) {
+  let x = (BigInt.asUintN(64, BigInt(n)) + 0x9E3779B97F4A7C15n) & MASK64;
+  x = ((x ^ (x >> 30n)) * 0xBF58476D1CE4E5B9n) & MASK64;
+  x = ((x ^ (x >> 27n)) * 0x94D049BB133111EBn) & MASK64;
+  x ^= x >> 31n;
+  return Number(x >> 11n) / 9007199254740992;
+}
+
+/** The set a slot belongs to: every shape released in one cycle shares one. */
+function setOf(p, slot) {
+  const count = Math.max(1, p.count);
+  return Math.floor(p.phase - slot / count);
+}
+
+/** Where set `set` runs on the cross axis. Off is Across; Step adds Lane Step
+ *  per set; Random moves half the band plus a jitter small enough that two
+ *  consecutive sets are never closer than one shape. Both wrap inside the band
+ *  where a whole shape stays on the frame. */
+function laneAcross(p, set) {
+  if (p.lanes === 0) return p.across;
+
+  const e = Math.min(0.45, crossHalfThickness(p));
+  const band = 1 - 2 * e;
+  const u0 = (p.across - e) / band;
+
+  let u;
+  if (p.lanes === 1) {
+    u = fract(u0 + (set * p.laneStep) / band);
+  } else {
+    const sep = Math.min(1, (2 * e) / band);
+    const jitter = Math.max(0, 0.5 - sep);
+    u = fract(u0 + 0.5 * set + (hash01(set) - 0.5) * jitter);
+  }
+  return e + u * band;
+}
+
+/** Which cell a shape gets, by its release number. Same as PickCell, including
+ *  the second hash stream, so a Random pick here is the plugin's pick. */
+function pickCell(pick, release, sprite, cellCount) {
+  if (cellCount <= 0) return 0;
+  let index;
+  if (pick === 1) {
+    let x = (BigInt.asUintN(64, BigInt(release)) * 0xD1B54A32D192ED03n + 0x632BE59BD9B4E019n) & MASK64;
+    x = ((x ^ (x >> 30n)) * 0xBF58476D1CE4E5B9n) & MASK64;
+    x = ((x ^ (x >> 27n)) * 0x94D049BB133111EBn) & MASK64;
+    x ^= x >> 31n;
+    index = Number(x % BigInt(cellCount));
+  } else if (pick === 2) {
+    index = release + sprite;
+  } else {
+    index = sprite;
+  }
+  return ((index % cellCount) + cellCount) % cellCount;
 }
 
 /** Centre-to-centre spacing between standing shapes, in frame-span units. At
@@ -576,6 +775,9 @@ function solveSlot(p, slot) {
   const dwell = clamp01(p.dwell);
   const age = slotAge(p, slot);
 
+  const set = setOf(p, slot);
+  const across = laneAcross(p, set);
+
   const arrive = (park + m) / v;
 
   let depth = park;
@@ -589,10 +791,10 @@ function solveSlot(p, slot) {
   // y = 0 and travels towards 1.
   let x;
   let y;
-  if (p.side === 0) { x = depth; y = p.across; }
-  else if (p.side === 1) { x = 1 - depth; y = p.across; }
-  else if (p.side === 2) { x = p.across; y = depth; }
-  else { x = p.across; y = 1 - depth; }
+  if (p.side === 0) { x = depth; y = across; }
+  else if (p.side === 1) { x = 1 - depth; y = across; }
+  else if (p.side === 2) { x = across; y = depth; }
+  else { x = across; y = 1 - depth; }
 
   // Colour is keyed off the SLOT, not the draw order, so a hue spread reads as
   // a stable pattern marching through rather than the whole set flickering
@@ -630,6 +832,8 @@ function solveSlot(p, slot) {
     age,
     depth,
     standing,
+    set,
+    release: set * count + slot,
   };
 }
 
@@ -671,6 +875,8 @@ const PRESET_TABLE = [
     3, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0.0]],
   ['Shingle', [0, 0.66, 0.5, 0.0, 0.0, 0.0, 0.0, 0, 0.25, 0.78, 0.1, 0.55, 0.5,
     2, 0.2, 0.6, 1.0, 0.35, 1, 0, 0, 0, 1, 0, 1.0]],
+  ['Bullseye', [6, 0.66, 0.5, 0.0, 0.7, 0.35, 0.0, 0, 0.315, 0.8, 0.15, 0.55, 0.55,
+    1, 0.35, 0.85, 0.25, 1, 1, 0, 0, 0, 1, 0, 0.6]],
 ];
 
 const PRESETS = Object.fromEntries(
@@ -717,6 +923,33 @@ class ShuntRenderer {
 
     this.xform = new Float32Array(MAX_SHAPES * 4);
     this.tint = new Float32Array(MAX_SHAPES * 4);
+    this.cell = new Float32Array(MAX_SHAPES * 4);
+
+    // One white texel for the Imagery sampler while no image is chosen, as
+    // the plugin does: a sampler on texture 0 is "unloadable" to some drivers.
+    this.placeholder = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+      new Uint8Array([255, 255, 255, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  /** The source's reading of Mask Mode: 0 Over, 1 Matte, 2 Inverse Matte. */
+  sourceOutput(params, isEffect) {
+    return isEffect ? 0 : Math.min(2, params.option('maskMode'));
+  }
+
+  /** The blend actually used: a matte is Over whatever Blend says. */
+  blendUsed(params, isEffect) {
+    return this.sourceOutput(params, isEffect) !== 0 ? 0 : params.option('blend');
+  }
+
+  /** The source fades through the constant blend factor except under Max,
+   *  which ignores factors. See ApplyBlend in Shunt.cpp. */
+  sourceFadesInBlend(params, isEffect) {
+    return !isEffect && this.blendUsed(params, isEffect) !== 2;
   }
 
   /**
@@ -758,6 +991,9 @@ class ShuntRenderer {
       dwell: dwellFromParam(params.get('dwell')),
       across: acrossFromParam(params.get('across')),
 
+      lanes: params.option('lanes'),
+      laneStep: laneStepFromParam(params.get('laneStep')),
+
       gapUnits,
       gapValue: gapFromParam(params.get('gap'), gapUnits === 1),
       // The pixel span is the raster's own count on the axis the train runs
@@ -775,22 +1011,24 @@ class ShuntRenderer {
       b: clamp01(params.get('shapeB')),
       hueSpread: hueSpreadFromParam(params.get('hueSpread')),
 
-      // Mix fades the shape layer. The source has no clip to mix against, so it
-      // ignores it — the parameter exists in both only so that a composition
-      // moved from one plugin to the other does not find its list has shifted.
-      opacity: clamp01(params.get('opacity')) * (isEffect ? clamp01(params.get('mix')) : 1),
+      // Mix fades the shape layer against the clip in the effect. In the source
+      // it fades the whole output, through the blend's constant factor rather
+      // than the alpha except under Max — see sourceFadesInBlend.
+      opacity: clamp01(params.get('opacity'))
+        * (this.sourceFadesInBlend(params, isEffect) ? 1 : clamp01(params.get('mix'))),
 
       aspect: width > 0 && height > 0 ? width / height : 1,
     };
   }
 
-  applyBlend(blend) {
+  applyBlend(blend, fade) {
     const gl = this.gl;
     gl.enable(gl.BLEND);
+    gl.blendColor(0, 0, 0, fade);
 
     if (blend === 1) {
       gl.blendEquation(gl.FUNC_ADD);
-      gl.blendFunc(gl.ONE, gl.ONE);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE);
     } else if (blend === 2) {
       // MAX ignores the factors entirely and takes the channel-wise maximum of
       // source and destination. That is what a mask wants — and it also throws
@@ -803,7 +1041,7 @@ class ShuntRenderer {
       // Premultiplied over, matching the shader's output. Draw order decides
       // what is on top, and solve() sorts newest last for exactly that reason.
       gl.blendEquation(gl.FUNC_ADD);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
   }
 
@@ -817,8 +1055,32 @@ class ShuntRenderer {
     const count = wagons.length;
 
     const mask = isEffect ? params.option('maskMode') : 0;
-    const blend = params.option('blend');
+    const output = this.sourceOutput(params, isEffect);
+    const matte = output !== 0;
+    const blend = this.blendUsed(params, isEffect);
     const mix01 = clamp01(params.get('mix'));
+    const fade = this.sourceFadesInBlend(params, isEffect) ? mix01 : 1;
+
+    // Shadows: not in Hide, whose blend would punch them out as holes, and not
+    // in a matte.
+    const shadowAmount = clamp01(params.get('shadow'));
+    const shadows = shadowAmount > 0.001 && !matte && mask !== 2;
+
+    // The plugin's Image is a file parameter. A page cannot read a path off
+    // the visitor's disk, so here the clip picker's picture stands in for the
+    // chosen file — a sheet, if you pick one of your own and say Sprite Sheet.
+    // Folder has no stand-in and behaves as Single.
+    const hasImage = params.option('image') === 1 && !!input?.texture;
+    const imageSource = params.option('imageSource');
+    let cells = [[0, 0, 1, 1]];
+    if (hasImage && imageSource === 2) {
+      const cols = columnsFromParam(params.get('columns'));
+      const rows = columnsFromParam(params.get('rows'));
+      cells = [];
+      for (let j = 0; j < rows; j += 1) {
+        for (let i = 0; i < cols; i += 1) cells.push([i / cols, j / rows, (i + 1) / cols, (j + 1) / rows]);
+      }
+    }
 
     // Reveal and Colourise build their picture only where the shapes are, so the
     // clip behind them fades IN as the effect mixes OUT.
@@ -842,13 +1104,16 @@ class ShuntRenderer {
       // whole of it. In Resolume it is whatever GetMaxGLTexCoords reports.
       background.set('MaxUV', 1, 1);
       background.set('ClipGain', clipGain);
+    } else if (matte) {
+      const level = output === 2 ? 1 : 0;
+      background.set('BackColour', level, level, level, mix01);
     } else {
       background.set(
         'BackColour',
         clamp01(params.get('backR')),
         clamp01(params.get('backG')),
         clamp01(params.get('backB')),
-        clamp01(params.get('backOpacity')),
+        clamp01(params.get('backOpacity')) * mix01,
       );
     }
 
@@ -871,10 +1136,22 @@ class ShuntRenderer {
       this.tint[x + 1] = w.g;
       this.tint[x + 2] = w.b;
       this.tint[x + 3] = w.a;
+
+      const c = cells[pickCell(params.option('imagePick'), w.release,
+        spriteFromParam(params.get('sprite')), cells.length)];
+      // The kit's clip texture is uploaded with v = 0 at the BOTTOM, as a
+      // host's clip is; the plugin's own image upload puts the top row at
+      // v = 0. Flip the rectangle here so the shader, which is the plugin's,
+      // sees the top of the picture where it expects it.
+      this.cell[x + 0] = c[0];
+      this.cell[x + 1] = 1 - c[1];
+      this.cell[x + 2] = c[2];
+      this.cell[x + 3] = 1 - c[3];
     }
 
     shape.setArray('Xform', this.xform.subarray(0, count * 4), 4);
     shape.setArray('Tint', this.tint.subarray(0, count * 4), 4);
+    shape.setArray('Cell', this.cell.subarray(0, count * 4), 4);
 
     const outline = clamp01(params.get('outline'));
     const softness = softnessFromParam(params.get('softness'));
@@ -894,6 +1171,21 @@ class ShuntRenderer {
     shape.set('Shade', clamp01(params.get('shade')));
     shape.set('LightAngle', clamp01(params.get('light')));
     shape.setInt('SampleMode', sampleMode);
+    shape.setInt('Matte', output);
+
+    const lightTurn = clamp01(params.get('light')) * Math.PI * 2;
+    const distance = shadowDistanceFromParam(params.get('shadowDistance'));
+    shape.setInt('ShadowPass', shadows ? 1 : 0);
+    shape.set('ShadowOffset', -Math.cos(lightTurn) * distance, Math.sin(lightTurn) * distance);
+    shape.set('ShadowBlur', shadows ? shadowBlurFromParam(params.get('shadowBlur')) : 0);
+    shape.set('ShadowAmount', shadowAmount);
+
+    shape.setInt('HasImage', hasImage ? 1 : 0);
+    shape.set('ImageMix', clamp01(params.get('imageMix')));
+    shape.set('SideTurn', sideRotation(queue.side));
+    bindTexture(gl, 1, hasImage ? input.texture : this.placeholder);
+    shape.setSampler('Imagery', 1);
+    gl.activeTexture(gl.TEXTURE0);
 
     if (isEffect) {
       bindTexture(gl, 0, input.texture);
@@ -909,10 +1201,13 @@ class ShuntRenderer {
       gl.blendEquation(gl.FUNC_ADD);
       gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
     } else {
-      this.applyBlend(blend);
+      this.applyBlend(blend, fade);
     }
 
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
+    // Two instances per shape with shadows on — its shadow, then itself.
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, shadows ? count * 2 : count);
+    bindTexture(gl, 1, null);
+    gl.activeTexture(gl.TEXTURE0);
 
     //---------------------------------------------------------------------
     // Leave the state as the page is entitled to find it.
@@ -920,6 +1215,7 @@ class ShuntRenderer {
     gl.disable(gl.BLEND);
     gl.blendEquation(gl.FUNC_ADD);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendColor(0, 0, 0, 0);
     gl.bindVertexArray(null);
   }
 }
@@ -956,9 +1252,11 @@ mountDemo({
   sources: ['scene', 'grid', 'bars', 'ramp', 'spot', 'detail', 'alpha'],
 
   differences: [
-    'The clip picker only does anything in Shunt Mask. The source has no input at all — SetMinInputs is 0 — and draws over its own Background colour.',
+    'The clip picker is the clip only in Shunt Mask. The source has no input at all — SetMinInputs is 0 — and draws over its own Background colour; here the picked clip also stands in for the Image, below.',
+    'Image is a file parameter in the plugin, and a page cannot read a path from your disk, so the clip picker\'s picture — or one of your own — stands in for the chosen file. Folder, which loads every image beside the chosen one, has nothing to stand in for it and behaves as Single here.',
+    'Columns, Rows and Sprite are integer parameters in the plugin, typed into as numbers. Here they are sliders that show the integer they land on.',
     'Beat and Bar lock to a 120 BPM transport generated in this page, which is the tempo the plugin falls back to when a host reports none. Resolume would supply its own, and the bar position with it. Manual ignores the clock entirely and is driven by the Phase slider, exactly as in the host.',
-    'Preset is an option parameter in the plugin, with Custom as element 0 and a slider edit dropping back to it. Here the same six presets are in the panel header instead, from the plugin\'s own table.',
+    'Preset is an option parameter in the plugin, with Custom as element 0 and a slider edit dropping back to it. Here the same seven presets are in the panel header instead, from the plugin\'s own table.',
     'Gap in Pixels counts pixels of THIS canvas, so changing the resolution picker changes how much of the frame a given number of pixels is — which is the point of the unit, and exactly what it does against a real pixel map.',
   ],
 
@@ -1095,9 +1393,68 @@ mountDemo({
     {
       id: 'maskMode', name: 'Mask Mode', type: 'option', default: 0, group: 'Output',
       elements: MASK_MODE_NAMES,
-      hint: 'Shunt Mask only. Reveal samples the clip inside the shape fragment; Hide punches the shapes out with a blend function. Neither needs a mask buffer, which is why there is no FBO anywhere in this plugin.',
+      hint: 'In Shunt Mask: Reveal samples the clip inside the shape fragment, Hide punches the shapes out with a blend function, Colourise tints the clip. In Shunt, the source: Matte is white shapes on black and Inverse Matte black on white, for another layer to key against.',
     },
-    { id: 'mix', name: 'Mix', type: 'standard', default: 1.0, group: 'Output', display: pct },
+    {
+      id: 'mix', name: 'Mix', type: 'standard', default: 1.0, group: 'Output', display: pct,
+      hint: 'In Shunt Mask, the effect against the untouched clip. In Shunt, the whole output faded to transparent.',
+    },
+
+    //---- Lanes ------------------------------------------------------------
+    {
+      id: 'lanes', name: 'Lanes', type: 'option', default: 0, group: 'Lanes',
+      elements: LANES_NAMES,
+      hint: 'Whether each new set of shapes runs on a new line. A set is one cycle of releases. Step moves each set Lane Step across, wrapping; Random picks a lane at least one shape clear of the last.',
+    },
+    {
+      id: 'laneStep', name: 'Lane Step', type: 'standard', default: 0.7, group: 'Lanes',
+      display: (v) => `${Math.round(laneStepFromParam(v) * 100)}%`,
+      hint: 'How far across each new set moves, as a share of the frame. Negative is up (or left); 0 at the middle of the slider.',
+    },
+
+    //---- Shadow -----------------------------------------------------------
+    {
+      id: 'shadow', name: 'Shadow', type: 'standard', default: 0.0, group: 'Shadow', display: pct,
+      hint: 'A drop shadow on everything behind each shape, falling away from the Light. Drawn with its own shape, so it falls on the shapes it has slid over and never on itself.',
+    },
+    {
+      id: 'shadowDistance', name: 'Shadow Distance', type: 'standard', default: 0.25, group: 'Shadow',
+      display: (v) => `${shadowDistanceFromParam(v).toFixed(2)} r`,
+    },
+    {
+      id: 'shadowBlur', name: 'Shadow Blur', type: 'standard', default: 0.3, group: 'Shadow',
+      display: (v) => `${shadowBlurFromParam(v).toFixed(2)} r`,
+    },
+
+    //---- Image ------------------------------------------------------------
+    {
+      id: 'image', name: 'Image', type: 'option', default: 0, group: 'Image',
+      elements: IMAGE_NAMES,
+      hint: 'A file parameter in the plugin. Here the clip picker\'s picture stands in for the file: pick a clip, or use your own.',
+    },
+    {
+      id: 'imageSource', name: 'Image From', type: 'option', default: 0, group: 'Image',
+      elements: IMAGE_SOURCE_NAMES,
+      hint: 'Single: the whole picture on every shape. Folder: every image beside the chosen file, one each (the plugin only — here it behaves as Single). Sprite Sheet: the picture cut into Columns x Rows.',
+    },
+    {
+      id: 'columns', name: 'Columns', type: 'standard', default: 1 / 15, group: 'Image',
+      display: (v) => String(columnsFromParam(v)),
+    },
+    {
+      id: 'rows', name: 'Rows', type: 'standard', default: 1 / 15, group: 'Image',
+      display: (v) => String(columnsFromParam(v)),
+    },
+    {
+      id: 'imagePick', name: 'Pick', type: 'option', default: 0, group: 'Image',
+      elements: IMAGE_PICK_NAMES,
+      hint: 'Same: every shape shows the Sprite. Random: each shape its own, kept for its whole run. In Order: each shape the next one along.',
+    },
+    {
+      id: 'sprite', name: 'Sprite', type: 'standard', default: 0, group: 'Image',
+      display: (v) => String(spriteFromParam(v)),
+    },
+    { id: 'imageMix', name: 'Image Mix', type: 'standard', default: 1.0, group: 'Image', display: pct },
   ],
 
   createRenderer: (gl) => new ShuntRenderer(gl),

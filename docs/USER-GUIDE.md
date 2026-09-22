@@ -10,16 +10,18 @@ Avenue — for animated masks, and for chroma animations driving a pixel map.
 *Twelve discs from the left, overlapping by a third of their own thickness — one
 arriving alone, three closing up, eight standing.*
 
-> **Before you rely on this:** released at **v0.1.0**, and honestly early. Every
+> **Before you rely on this:** released at **v0.2.0**, and honestly early. Every
 > geometric claim below is measured on rendered frames rather than asserted —
 > where each shape landed, to 1.5 px; how far apart the standing ones are, to a
 > pixel; how long one stands, in frames; which of two overlapping shapes is on
 > top. **Both plugins load and run in Resolume Arena 7.27.1**: the shipped
-> Windows build was checked in a real Arena, where both register correctly, all
-> 38 controls on each match what the plugin declares, and both render. That run
-> was on software rendering, so it says nothing about a GPU, and the plugin has
-> not yet been used in a show. **Try it on a spare layer first**, and please
-> report anything that misbehaves.
+> v0.1.0 Windows build was checked in a real Arena, where both register
+> correctly, every control matches what the plugin declares, and both render.
+> That run was on software rendering, so it says nothing about a GPU. The
+> controls 0.2.0 added — Lanes, Shadow, Image, and the source's Mask Mode — are
+> checked by the offline harness but have not yet been driven by a person in
+> Arena. **Try it on a spare layer first**, and please report anything that
+> misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
 > author.
@@ -45,8 +47,8 @@ Drop **SW Shunt** on an empty layer and it is already doing the thing: eight
 discs from the left, each overlapping the one in front by a quarter, banking up
 at 78% of the way across.
 
-The **Preset** dropdown at the bottom is the fastest way to see the range. Six
-looks, all built out of the same controls:
+The **Preset** dropdown near the bottom is the fastest way to see the range.
+Seven looks, all built out of the same controls:
 
 | Preset | What it is |
 |---|---|
@@ -56,6 +58,7 @@ looks, all built out of the same controls:
 | **Ladder Fall** | Rungs falling down the frame and piling at the bottom. |
 | **Ticker** | A dense hue-cycling stream of thin dashes from the right, barely stopping. |
 | **Shingle** | Big shaded discs sliding over one another as they bank up. |
+| **Bullseye** | Green targets — a thick Ring whose Outline strokes both its edges, leaving a ring and a dot. Found by an operator on the first night. |
 
 Editing any slider a preset covers drops the dropdown back to **Custom**. That
 is not you losing the preset — the sliders are still where it put them.
@@ -194,10 +197,101 @@ maximum does not care which shape came first, so under Max there is no "newer on
 top" at all. Over is the default for that reason.
 
 **Shade** lights each shape as though it had been inflated, with **Light**
-setting where the light comes from. It is off by default, and it earns its place
+setting where the light comes from — a full turn over the slider, 25% straight
+down from the top of the frame. It is off by default, and it earns its place
 here more than you might expect: a train of shaded shapes sliding over one
 another is what makes the overlap read as depth rather than as two flat shapes
 stacked.
+
+The light is fixed **on the screen**: turn a shape with Angle, or bring the
+train in from a different edge, and the highlight stays where Light put it.
+(Before 0.2.0 it turned with the shape.)
+
+---
+
+## Shadow
+
+![Shaded discs, each casting a soft shadow down onto the background and onto the disc it has slid over](shadows.png)
+
+| Control | |
+|---|---|
+| **Shadow** | How dark. 0 is off, and exactly the picture without shadows. |
+| **Shadow Distance** | How far the shadow is thrown, in multiples of the shape's own radius. |
+| **Shadow Blur** | How soft its edge is, in the same units. |
+
+The shadow falls **away from Light**, so shading and shadow agree. Each shape's
+shadow lands on the shapes it has slid over — never on the shape itself — so
+the newest shape on top looks like it is on top.
+
+Shadows are black, so on the default black background you only see them where
+they fall on other shapes: give the **Background** some colour to see the whole
+thing. They are not drawn in **Hide**, or in a **Matte** (below), and under
+**Blend** Add or Max they have nothing to darken and disappear.
+
+---
+
+## Lanes
+
+A **set** is one cycle's worth of shapes — **Count** of them, arriving one
+after another. Normally every set runs along the same line (**Across**), so at
+settings where the next set arrives while the last is still standing or
+leaving, the two run straight through each other. **Lanes** moves each new set
+somewhere else:
+
+| Lanes | Each new set |
+|---|---|
+| **Off** | On Across, every time. |
+| **Step** | **Lane Step** further across than the one before — up to half the frame either way, 0 in the middle of the slider — rolling over from one edge to the other. |
+| **Random** | On a random lane, never closer to the last set than one shape's own width. |
+
+Both keep every shape fully on the frame when they roll over. A set only ever
+changes lane off-stage, as its first shape is released, so nothing jumps
+sideways in view. Across still sets where the sequence starts.
+
+With a big shape the band is narrow: once a shape is more than a third of the
+frame across, Random has little room and alternates between two sides.
+
+---
+
+## Pictures on the shapes
+
+![Rounded squares each carrying a random cell of a four-cell sprite sheet, on two lanes, with drop shadows](image.png)
+
+Choose a file in **Image** and it appears inside every shape. **Image From**
+says what the file means:
+
+| Image From | |
+|---|---|
+| **Single** | The picture, on every shape. |
+| **Folder** | Every image in the same folder as the file you chose — sorted by name, up to 36 — one per shape. |
+| **Sprite Sheet** | The picture cut into **Columns** × **Rows**, one cell per shape. |
+
+**Pick** chooses which each shape gets:
+
+| Pick | |
+|---|---|
+| **Same** | Every shape shows the one **Sprite** names — 0 is the first; it wraps round past the end. |
+| **Random** | Each shape its own, chosen as it is released. |
+| **In Order** | Each shape the next along from the one before, starting at Sprite. |
+
+A shape keeps its picture for its whole run. **Image Mix** blends between the
+shape's own colour (0) and the picture (1); the Colour tints the picture, so
+White leaves it untouched and Solid red makes it red.
+
+A few things worth knowing:
+
+- **Each picture is cropped to a centred square**, because a shape is drawn over
+  a square. A wide photo on a circle shows the middle of the photo.
+- **It stays upright whichever edge the train comes in from**, and turns with
+  **Angle**.
+- **Sprite sheets are read exactly.** Columns and Rows are whole numbers you can
+  type in; if the picture does not divide exactly the log says so, because that
+  is the usual reason a sprite shows a sliver of its neighbour.
+- **Transparent parts of a picture are transparent in the shape**, and cast no
+  shadow.
+- A folder of large photos takes a moment to load — the frame is late once, when
+  you choose the file, not every frame after.
+- PNG, JPEG, GIF (first frame), BMP, TGA and PSD. Up to 8192 pixels on a side.
 
 ---
 
@@ -217,6 +311,28 @@ against a white shape colour it is arithmetically the same as Reveal.
 
 **Mix** fades the shape layer. On Reveal and Colourise the untouched clip fades
 back in as the effect fades out, so Mix at 0 is the clip as it arrived.
+
+---
+
+## A matte from SW Shunt
+
+**SW Shunt** has no clip to mask, so its **Mask Mode** makes a matte instead —
+for another layer's mask, or a luma key:
+
+| Mode | Result |
+|---|---|
+| **Over** | The train in its own colours, over the Background. |
+| **Matte** | White shapes on solid black. |
+| **Inverse Matte** | Black shapes on solid white. |
+
+A matte ignores colour, shading, shadows and Blend — it is a matte, and a grey
+fringe would be a partial key nobody asked for — but keeps Softness, Opacity and
+a picture's transparency, so a soft edge is a soft edge in the key too.
+
+**Mix** on SW Shunt fades its whole output, background and all, to transparent.
+
+(Before 0.2.0 these two controls sat in SW Shunt's Output group and did
+nothing. They were reported as broken on the first night, fairly.)
 
 ---
 
@@ -247,6 +363,10 @@ Otherwise, the usual suspects: **Speed** dragged to the very bottom is a
 deliberate dead zone that means *stopped*; **Opacity** or **Mix** at zero; and
 on **SW Shunt Mask**, **Mask Mode** set to Hide with Travel somewhere the shapes
 are off-frame.
+
+An **Image** that would not load leaves the shapes plain, and the log says
+which file and why — a path that has moved, a file that is not a picture, or
+one bigger than 8192 pixels.
 
 ---
 

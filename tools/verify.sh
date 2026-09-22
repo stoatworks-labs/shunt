@@ -193,6 +193,13 @@ step "Checks"
 "$BUILD/shtest" --round
 "$BUILD/shtest" --mask
 
+# 0.2.0, from the first field report: the source's Output group, lanes per set,
+# drop shadows, and pictures on the shapes.
+"$BUILD/shtest" --matte
+"$BUILD/shtest" --lanes
+"$BUILD/shtest" --shadow
+"$BUILD/shtest" --image
+
 #---------------------------------------------------------------------------
 step "Dead controls"
 #---------------------------------------------------------------------------

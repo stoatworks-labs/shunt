@@ -20,6 +20,7 @@ draw order or the blend state.
 - List parameters: `./build/shtest --list`
 - Contact sheets: `./build/shtest --shapes /tmp/shapes.png --sides /tmp/sides.png`
 - Set anything by name: `--set "Shape=7" --set "Dwell=0.9"`
+- Load an Image: `--file "Image=/path/to/picture.png" --set "Image From=2"`
 - A factory preset by number: `--set "Preset=6"` (0 is Custom)
 - Film it: `--pipe --size 1920x1080 --fps 30 [--effect] [--script cues.txt]` —
   raw RGBA frames on stdin, raw RGBA on stdout, the fleet's cue-sheet format
@@ -37,6 +38,10 @@ draw order or the blend state.
 - Newest on top: `./build/shtest --order`
 - Circles stay round off 1:1: `./build/shtest --round`
 - The four effect mask modes: `./build/shtest --mask`
+- The source's Mask Mode (Over / Matte / Inverse Matte) and Mix: `--matte`
+- Lanes per set, Step and Random: `--lanes`
+- Drop shadows fall away from the light, and not in Hide: `--shadow`
+- Image, Folder and Sprite Sheet on the shapes, and every Pick: `--image`
 - The host clock unit, and a Speed change: `--clock`, `--speed`
 - Factory presets against three host behaviours: `--presets`
 - ms/frame at 720p, 1080p and 4K: `--cost`
@@ -86,6 +91,15 @@ draw order or the blend state.
   **Option parameters are the exception** — they hold the element value.
 - **No FBO anywhere**, including for the effect's Reveal and Hide. Sidesteps two
   SDK bugs; see `AGENTS.md`.
+- **The source's Mask Mode and Mix are live** (0.2.0): Matte / Inverse Matte,
+  and a fade of the whole output through `glBlendColor`. Up to 0.1.0 both were
+  declared and ignored — reported from the field within hours.
+- **Controls added in 0.2.0 sit after `PT_PRESET`**, in their own groups, so no
+  0.1.0 id moves. Every one defaults to off.
+- **Image is a FILE parameter**: `SetTextParameter` must accept its empty
+  default or no host can instantiate the plugin. Decoded and uploaded on the
+  render thread when the (path, source, grid) key changes; stb_image lives in
+  `external/stb` and is compiled only in `Imagery.cpp`.
 - `shunt_core` is an **OBJECT** library, and each plugin's registration is
   listed directly in its own target — see `AGENTS.md`.
 - The GLSL declares `Xform[64]` as a literal; a `static_assert` keeps

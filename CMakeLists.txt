@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(Shunt
-    VERSION 0.1.0
+    VERSION 0.2.0
     LANGUAGES CXX
 )
 
@@ -81,11 +81,16 @@ add_library(shunt_core OBJECT
     source/Shaders.h
     source/Shaders.cpp
     source/Presets.h
+    source/Imagery.h
+    source/Imagery.cpp
     source/Shunt.h
     source/Shunt.cpp
 )
 
 target_include_directories(shunt_core PUBLIC source)
+# stb_image, single header, compiled once in Imagery.cpp. Vendored rather than a
+# submodule: it is one file, and flipbook carries the same copy.
+target_include_directories(shunt_core PRIVATE external/stb)
 target_link_libraries(shunt_core PUBLIC ffgl::sdk)
 target_compile_definitions(shunt_core PUBLIC SHUNT_VERSION="${PROJECT_VERSION}")
 set_target_properties(shunt_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

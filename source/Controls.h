@@ -56,6 +56,81 @@ enum class MaskMode
 
 const char* MaskModeName( MaskMode mode );
 
+/**
+    What the SOURCE does with the same `Mask Mode` parameter.
+
+    Up to 0.1.0 the source declared Mask Mode and Mix and ignored both, on the
+    grounds that it had no clip to mask. That was reported from the field as
+    "Mask Mode in Output doesn't seem to do anything" — a control an operator
+    can see and change and that changes nothing is a bug, whatever the reason.
+    So on the source the parameter keeps its id and its name, and offers the
+    thing a source *can* do for a mask: draw the train as a matte for another
+    layer to key against.
+
+    The element values line up with the effect's where they mean the same
+    thing, so a composition moved from one plugin to the other lands somewhere
+    sensible: Reveal (1) is Matte, and Hide (3) — which a source instance has
+    only three elements to hold — clamps to Inverse Matte.
+*/
+enum class SourceOutput
+{
+	Normal = 0,    ///< The train in its own colours, over the Background.
+	Matte,         ///< White shapes on opaque black: a luma matte.
+	InverseMatte,  ///< Black shapes on opaque white: the same matte, inverted.
+
+	Count
+};
+
+const char* SourceOutputName( SourceOutput mode );
+
+/**
+    Whether each new set of shapes comes in on the same line as the last.
+
+    A **set** is one cycle's worth of releases — `Count` shapes. With Lanes off
+    every set runs along `Across`, so at settings where the next set arrives
+    while the last is still standing or leaving, the two run straight through
+    each other. Asked for from the field in those words: "change the Y value
+    for each set so that the next set doesn't overlap the previous".
+
+    The set number is `floor( phase - slot / count )`, which is a pure function
+    of (slot, phase) like everything else in the queue — so a lane is too, and
+    no state is added.
+*/
+enum class Lanes
+{
+	Off = 0,  ///< Every set on `Across`.
+	Step,     ///< Each set `Lane Step` further across than the last, wrapping.
+	Random,   ///< Each set on a random lane at least one shape clear of the last.
+
+	Count
+};
+
+const char* LanesName( Lanes lanes );
+
+/// Where the shapes' image comes from. What the Image file parameter means.
+enum class ImageSource
+{
+	Single = 0,  ///< The chosen file, whole, on every shape.
+	Folder,      ///< Every image in the chosen file's folder, one per shape.
+	Sheet,       ///< The chosen file cut into a Columns x Rows grid.
+
+	Count
+};
+
+const char* ImageSourceName( ImageSource source );
+
+/// Which image, or which cell of a sheet, each shape gets.
+enum class ImagePick
+{
+	Same = 0,  ///< Every shape shows the one the Sprite control names.
+	Random,    ///< Each shape its own, chosen at random when it is released.
+	InOrder,   ///< Each shape the next one along from the shape before it.
+
+	Count
+};
+
+const char* ImagePickName( ImagePick pick );
+
 /// Where phase comes from.
 enum class Sync
 {
@@ -133,6 +208,31 @@ enum ParamId : unsigned int
 	// ever added or removed.
 	PT_PRESET,
 
+	//-----------------------------------------------------------------------
+	// Added in 0.2.0, from the first field report. After PT_PRESET rather than
+	// in with the groups they belong beside, for the same reason Preset is
+	// where it is: a saved composition refers to parameters by id, and every
+	// id before these is one a 0.1.0 composition already uses.
+	//-----------------------------------------------------------------------
+
+	// Lanes
+	PT_LANES,
+	PT_LANE_STEP,
+
+	// Shadow
+	PT_SHADOW,
+	PT_SHADOW_DISTANCE,
+	PT_SHADOW_BLUR,
+
+	// Image
+	PT_IMAGE_FILE,
+	PT_IMAGE_SOURCE,
+	PT_COLUMNS,
+	PT_ROWS,
+	PT_IMAGE_PICK,
+	PT_SPRITE,
+	PT_IMAGE_MIX,
+
 	// -- The Stoatworks About block ------------------------------------------
 	//
 	// One display-only text line, then one button per link the block carries:
@@ -202,5 +302,26 @@ float AcrossFromParam( float value );
 
 /// Hue range spanned along the train, in turns. 0..1.
 float HueSpreadFromParam( float value );
+
+/// How far across each new set moves, as a fraction of the frame's span
+/// ACROSS the direction of travel. -0.5..0.5, linear, exactly 0 at the centre
+/// of the slider. Positive is right for a vertical train and down for a
+/// horizontal one — frame space runs y-down.
+float LaneStepFromParam( float value );
+
+/// Shadow offset, in multiples of the shape's own radius. 0..1.
+float ShadowDistanceFromParam( float value );
+
+/// Shadow feather, in multiples of the shape's own radius. 0..1.
+float ShadowBlurFromParam( float value );
+
+/// The grid a sprite sheet is cut into. Integer parameters with a real range,
+/// because a sheet is somebody else's grid and a slider that lands either side
+/// of 5 cannot read it. `FF_TYPE_INTEGER` with a range is proven in Arena by
+/// burin's Shape Count.
+constexpr int kMaxGrid = 16;
+
+/// The highest sprite index the Sprite control offers. Wraps past the end.
+constexpr int kMaxSprite = 255;
 
 } // namespace shunt

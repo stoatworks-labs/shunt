@@ -20,7 +20,7 @@ namespace stoatworks::about
     inline constexpr auto guide = "https://stoatworks-labs.com/software/shunt/guide/";
     inline constexpr auto page = "https://stoatworks-labs.com/software/shunt/";
     inline constexpr auto repo = "https://github.com/stoatworks-labs/shunt";
-    inline constexpr auto versionFallback = "v0.1.0";
+    inline constexpr auto versionFallback = "v0.2.0";
 
     inline constexpr auto org = "Stoatworks Labs";
     inline constexpr auto home = "https://stoatworks-labs.com";

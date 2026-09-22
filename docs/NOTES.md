@@ -3,7 +3,61 @@
 Decisions already made, traps that have actually bitten, and what is honestly
 still unknown. `AGENTS.md` is the orientation; this is the log.
 
+## 0.2.0, the first field report, 2026-09-22
+
+The operator who asked for Shunt ran 0.1.0 in Arena the night it shipped and
+sent six notes. Everything in them is in 0.2.0; what is worth keeping from
+doing it:
+
+- **The Mask Mode bug was known and excused.** `tools/sweep.py` listed Mix and
+  Mask Mode as EFFECT_ONLY, i.e. "dead on the source, do not look". The sweep
+  was right that they were dead and wrong to excuse it: a declared control that
+  does nothing is a bug to the person moving it. The fix gave the source's
+  Mask Mode a meaning (Over / Matte / Inverse Matte) and its Mix a true fade,
+  and the sweep now excuses nothing: 47 parameters, Mix and Mask Mode swept on
+  both plugins.
+- **Identified from his screenshot, not his words.** "Mask mode in Output
+  doesn't seem to do anything" could have been either plugin; the screenshot of
+  the rings was on the source's default black background, which settled it.
+- **A true fade needs the blend, not the alpha.** Scaling the background and
+  each shape's alpha by Mix and then compositing gives `m·s + m·b·(1 − m·a)` —
+  shapes over the background stay visibly too opaque. Scaling the SOURCE factor
+  by a constant alpha instead (`glBlendColor` + `GL_CONSTANT_ALPHA`) gives
+  exactly `m·(s + b·(1 − a))`. Max ignores blend factors, so under Max Mix goes
+  back into the alpha, which is still exact because max commutes with a common
+  scale. `--matte` measures Mix 0.5 at exactly half, inside a shape and out.
+- **A sampler on texture 0 is "unloadable" to Apple's GL**, which prints
+  `UNSUPPORTED (log once): POSSIBLE ISSUE: unit 0 GLD_TEXTURE_INDEX_2D is
+  unloadable` on every run even though the shader never samples it while
+  `HasImage` is 0. A 1×1 white placeholder texture silences it, and a stricter
+  driver is within its rights to do worse than print.
+- **Random lanes are closed-form.** The request was "a random amount greater
+  than the height of the object" — the natural reading is a random walk, which
+  is a running sum, which is state. Half the band per set plus a bounded jitter
+  gives the same guarantee with the position of set n a function of n alone.
+- **Shadows interleave with their shapes.** Two instances per shape in one draw,
+  shadow first. All-shadows-then-all-shapes looks fine with one shape and wrong
+  the moment two overlap.
+- **The shading light used to turn with the shape.** It was computed in shape
+  space. Nobody had noticed because nothing else in the picture said where the
+  light was; a drop shadow cast from the same control would have contradicted
+  it at once. Now screen-fixed, and the README says the look changed.
+
+**Still unexplained:** his "Ring with 0.9 outline and 0.56 roundness" renders in
+`shtest` as solid overlapping discs — an Outline half-width of 0.45 covers the
+whole of a 0.56-thick ring and the hole in the middle. His Arena screenshot shows
+a ring and a dot, which `shtest` reproduces at about Outline 0.35 and Roundness
+0.7; that is what the Bullseye preset uses. Either the numbers were misread off
+the inspector, or Arena hands the plugin values that differ from the ones it
+displays. The second would matter far beyond this preset, so it is the first
+thing to check in a real Arena: set Outline to 0.9 by typing it, and compare
+with `shtest --set Outline=0.9`.
+
 ## Status, 2026-09-22
+
+v0.2.0 on the branch that answers the field report: `tools/verify.sh` green,
+now with `--matte`, `--lanes`, `--shadow` and `--image`, and the sweep at 47
+live parameters. Everything below is about v0.1.0.
 
 v0.1.0. `tools/verify.sh` green on an Apple M4 Max, macOS 26.4.1: universal
 build, both bundles export `plugMain` and ad-hoc sign, 92 slot runs tile the

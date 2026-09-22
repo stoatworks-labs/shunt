@@ -22,11 +22,16 @@
         --order           the newest shape is drawn on top
         --round           circles stay round, and stay put, off 1:1
         --mask            the four effect mask modes
+        --matte           the source's Mask Mode and Mix
+        --lanes           each set on its own lane, and never on the last one
+        --shadow          drop shadows fall away from the light
+        --image           a picture, a folder, a sprite sheet, on the shapes
         --cost            ms/frame at 720p, 1080p and 4K
         --pipe            raw RGBA frames in, raw RGBA frames out (see runPipe)
         --script PATH     cues for --pipe: `frame  Parameter Name  value`
         --fps F           the frame rate --pipe's clock runs at (default 30)
         --effect          use the effect variant (with --out, --list, --pipe)
+        --file "Name=P"   set a file parameter (the Image) by name
 
     ## What is measured on the picture and what is not
 
@@ -53,6 +58,7 @@
 #include <OpenGL/gl3.h>
 #include <zlib.h>
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -302,6 +308,29 @@ bool applySetting( ShuntPlugin& plugin, const std::string& assignment )
 	}
 
 	plugin.SetFloatParameter( found->second, std::stof( value ) );
+	return true;
+}
+
+/// `Name=path` for a file parameter, which arrives through SetTextParameter as
+/// it does from a host rather than as a float.
+bool applyFile( ShuntPlugin& plugin, const std::string& assignment )
+{
+	const size_t equals = assignment.find( '=' );
+	if( equals == std::string::npos )
+	{
+		fprintf( stderr, "--file wants Name=path, got '%s'\n", assignment.c_str() );
+		return false;
+	}
+
+	const std::map< std::string, unsigned int > byName = parameterIndex( plugin );
+	const auto found = byName.find( assignment.substr( 0, equals ) );
+	if( found == byName.end() )
+	{
+		fprintf( stderr, "no parameter called '%s'\n", assignment.substr( 0, equals ).c_str() );
+		return false;
+	}
+
+	plugin.SetTextParameter( found->second, assignment.substr( equals + 1 ).c_str() );
 	return true;
 }
 
@@ -601,6 +630,10 @@ int listParameters( ShuntPlugin& plugin )
 			typeName = "colour";
 		else if( type == FF_TYPE_TEXT )
 			typeName = "text";
+		else if( type == FF_TYPE_FILE )
+			typeName = "file";
+		else if( type == FF_TYPE_INTEGER )
+			typeName = "integer";
 		else if( type == FF_TYPE_BUFFER )
 			typeName = "buffer";
 
@@ -1773,6 +1806,1003 @@ int maskCheck()
 }
 
 //---------------------------------------------------------------------------
+// Shared by the 0.2.0 checks: one big shape standing in the middle.
+//---------------------------------------------------------------------------
+using Rgba = std::array< double, 4 >;
+
+Rgba pixelAt( const std::vector< unsigned char >& image, int width, int height, double x, double y )
+{
+	// Frame space (0..1, y down) to a GL row, clamped onto the raster.
+	const int col   = std::clamp( static_cast< int >( x * width ), 0, width - 1 );
+	const int glRow = std::clamp( static_cast< int >( ( 1.0 - y ) * height ), 0, height - 1 );
+	const unsigned char* p = &image[ ( static_cast< size_t >( glRow ) * width + col ) * 4 ];
+	return Rgba{ p[ 0 ] / 255.0, p[ 1 ] / 255.0, p[ 2 ] / 255.0, p[ 3 ] / 255.0 };
+}
+
+bool near3( const Rgba& a, double r, double g, double b, double tol = 0.08 )
+{
+	return std::fabs( a[ 0 ] - r ) < tol && std::fabs( a[ 1 ] - g ) < tol && std::fabs( a[ 2 ] - b ) < tol;
+}
+
+std::string describe( const Rgba& a )
+{
+	char text[ 64 ];
+	snprintf( text, sizeof( text ), "%.2f %.2f %.2f a%.2f", a[ 0 ], a[ 1 ], a[ 2 ], a[ 3 ] );
+	return text;
+}
+
+/// One shape of `shape`, `size` short-edge fractions across, standing at the
+/// middle of the frame. Everything the new checks need to sample an unambiguous
+/// inside and outside.
+void configureSingle( ShuntPlugin& plugin, Shape shape, float size )
+{
+	plugin.SetFloatParameter( PT_SHAPE, static_cast< float >( shape ) );
+	plugin.SetFloatParameter( PT_WAGONS, countParam( 1 ) );
+	plugin.SetFloatParameter( PT_SIZE, sizeParam( size ) );
+	plugin.SetFloatParameter( PT_TRAVEL, 0.5f );
+	plugin.SetFloatParameter( PT_DWELL, dwellParam( 0.9f ) );
+	plugin.SetFloatParameter( PT_SOFTNESS, 0.0f );
+}
+
+/// The phase at which the one shape stands, and where it stands.
+bool singleStanding( ShuntPlugin& plugin, int width, int height, float& phase, Wagon& where )
+{
+	const QueueParams probe = plugin.CurrentQueue( width, height );
+	if( !standingPhase( probe, 1, phase ) )
+		return false;
+
+	QueueParams at = probe;
+	at.phase       = phase;
+	where          = SolveSlot( at, 0 );
+	return true;
+}
+
+//---------------------------------------------------------------------------
+// --lanes
+//
+// "Can there be a setting to change the Y value for each set of objects so
+// that the next set doesn't overlap the previous." No GL for the arithmetic;
+// then a rendered pass, because the lane has to reach the picture.
+//---------------------------------------------------------------------------
+int lanesCheck()
+{
+	int failures = 0;
+
+	auto fail = [&]( const std::string& what ) {
+		printf( "  FAIL lanes %s\n", what.c_str() );
+		++failures;
+	};
+
+	QueueParams base;
+	base.shape   = Shape::Circle;
+	base.side    = Side::Left;
+	base.count   = 6;
+	base.size    = 0.06f;
+	base.travel  = 0.8f;
+	base.dwell   = 0.6f;
+	base.gapValue = 1.2f;
+	base.aspect  = 16.0f / 9.0f;
+	base.across  = 0.5f;
+
+	//-----------------------------------------------------------------------
+	// Off is exactly the old behaviour: every shape on Across, every set.
+	//-----------------------------------------------------------------------
+	{
+		QueueParams p = base;
+		p.lanes       = Lanes::Off;
+		for( int step = 0; step < 200; ++step )
+		{
+			p.phase = step * 0.173f - 7.0f;
+			for( int slot = 0; slot < p.count; ++slot )
+				if( SolveSlot( p, slot ).y != p.across )
+				{
+					fail( "Off moved a shape off Across" );
+					step = 200;
+					break;
+				}
+		}
+	}
+
+	//-----------------------------------------------------------------------
+	// Every shape of a set shares its lane, at every phase, in both modes, on
+	// both axes. A lane that changed mid-run would be a shape jumping sideways
+	// in the middle of the frame.
+	//-----------------------------------------------------------------------
+	for( Lanes mode : { Lanes::Step, Lanes::Random } )
+	{
+		for( Side side : { Side::Left, Side::Top } )
+		{
+			QueueParams p = base;
+			p.lanes       = mode;
+			p.laneStep    = 0.23f;
+			p.side        = side;
+
+			std::map< long long, float > laneOfSet;
+			bool ok = true;
+			for( int step = 0; step < 900 && ok; ++step )
+			{
+				p.phase = step * 0.0371f - 11.0f;
+				for( int slot = 0; slot < p.count; ++slot )
+				{
+					const Wagon w     = SolveSlot( p, slot );
+					const float cross = TravelsHorizontally( side ) ? w.y : w.x;
+					const auto found  = laneOfSet.find( w.set );
+					if( found == laneOfSet.end() )
+						laneOfSet[ w.set ] = cross;
+					else if( std::fabs( found->second - cross ) > 1e-5f )
+					{
+						fail( std::string( LanesName( mode ) ) + ": set " + std::to_string( w.set )
+						      + " changed lane mid-run" );
+						ok = false;
+						break;
+					}
+				}
+			}
+			if( ok )
+				printf( "  ok   lanes %-6s %-4s every shape of a set on one lane (%zu sets)\n",
+				        LanesName( mode ), SideName( side ), laneOfSet.size() );
+		}
+	}
+
+	//-----------------------------------------------------------------------
+	// Step: each set exactly Lane Step further across than the one before,
+	// wrapping within the band where a whole shape stays on the frame.
+	//-----------------------------------------------------------------------
+	for( float stepSize : { 0.2f, -0.15f, 0.45f } )
+	{
+		QueueParams p = base;
+		p.lanes       = Lanes::Step;
+		p.laneStep    = stepSize;
+
+		const double e    = CrossHalfThickness( p );
+		const double band = 1.0 - 2.0 * e;
+		bool ok           = true;
+
+		for( long long set = -40; set < 400 && ok; ++set )
+		{
+			const double a = LaneAcross( p, set - 1 );
+			const double b = LaneAcross( p, set );
+
+			if( a < e - 1e-4 || a > 1.0 - e + 1e-4 )
+			{
+				fail( "Step put a lane where the shape is off the frame: " + std::to_string( a ) );
+				ok = false;
+			}
+
+			// The step, taken round the wrap.
+			double moved = std::fmod( b - a - stepSize, band );
+			if( moved > band * 0.5 )
+				moved -= band;
+			if( moved < -band * 0.5 )
+				moved += band;
+			if( std::fabs( moved ) > 1e-4 )
+			{
+				fail( "Step moved set " + std::to_string( set ) + " by " + std::to_string( b - a )
+				      + " rather than " + std::to_string( stepSize ) );
+				ok = false;
+			}
+		}
+		if( ok )
+			printf( "  ok   lanes Step   %+.2f  every set exactly one step on, wrapping inside the frame\n", stepSize );
+	}
+
+	//-----------------------------------------------------------------------
+	// Random: consecutive sets never closer than one shape across, over a long
+	// run and at sizes from a speck to half the frame, and the lanes actually
+	// wander -- a "random" that sat in two places would pass the first test.
+	//-----------------------------------------------------------------------
+	for( float size : { 0.01f, 0.06f, 0.15f, 0.3f } )
+	{
+		QueueParams p = base;
+		p.lanes       = Lanes::Random;
+		p.size        = size;
+
+		const double e    = CrossHalfThickness( p );
+		const double band = 1.0 - 2.0 * e;
+		double closest    = 1e9;
+		double lo         = 1e9;
+		double hi         = -1e9;
+		bool ok           = true;
+
+		for( long long set = -500; set < 5000; ++set )
+		{
+			const double a = LaneAcross( p, set - 1 );
+			const double b = LaneAcross( p, set );
+			lo             = std::min( lo, b );
+			hi             = std::max( hi, b );
+
+			if( b < e - 1e-4 || b > 1.0 - e + 1e-4 )
+			{
+				fail( "Random put a lane where the shape is off the frame" );
+				ok = false;
+				break;
+			}
+
+			// Round the wrap, because a lane at the bottom and one at the top of
+			// the band are neighbours once the band rolls over.
+			double apart = std::fabs( b - a );
+			apart        = std::min( apart, band - apart );
+			closest      = std::min( closest, apart );
+		}
+
+		// Two shapes of cross half-extent e overlap when their centres are
+		// closer than 2e. A band too narrow to hold two shapes apart cannot
+		// meet that, and the design says so rather than pretending.
+		const double need = std::min( 2.0 * e, band * 0.5 );
+		if( ok && closest + 1e-4 < need )
+		{
+			fail( "Random at size " + std::to_string( size ) + ": consecutive sets "
+			      + std::to_string( closest ) + " apart, need " + std::to_string( need ) );
+			ok = false;
+		}
+
+		const double spread = ( hi - lo ) / band;
+		if( ok && band > 4.0 * e && spread < 0.8 )
+		{
+			fail( "Random at size " + std::to_string( size ) + " only used "
+			      + std::to_string( spread * 100.0 ) + "% of the frame" );
+			ok = false;
+		}
+
+		if( ok )
+			printf( "  ok   lanes Random size %.2f  closest consecutive %.3f (need %.3f), %.0f%% of the band used\n",
+			        size, closest, need, spread * 100.0 );
+	}
+
+	//-----------------------------------------------------------------------
+	// Lanes change where a shape runs, never how: its depth along the track,
+	// its age and whether it is standing are untouched, so --tile's invariant
+	// holds with lanes on without being re-proved.
+	//-----------------------------------------------------------------------
+	{
+		QueueParams off = base;
+		QueueParams on  = base;
+		on.lanes        = Lanes::Random;
+		bool ok         = true;
+		for( int step = 0; step < 300 && ok; ++step )
+		{
+			off.phase = on.phase = step * 0.0193f;
+			for( int slot = 0; slot < base.count; ++slot )
+			{
+				const Wagon a = SolveSlot( off, slot );
+				const Wagon b = SolveSlot( on, slot );
+				if( a.x != b.x || a.depth != b.depth || a.age != b.age || a.standing != b.standing )
+				{
+					fail( "Random changed a shape's motion along the track" );
+					ok = false;
+					break;
+				}
+			}
+		}
+		if( ok )
+			printf( "  ok   lanes        motion along the track identical with lanes on\n" );
+	}
+
+	//-----------------------------------------------------------------------
+	// And in the picture: render with Random lanes and find every isolated
+	// shape where the solver put it.
+	//-----------------------------------------------------------------------
+	{
+		const int width  = 640;
+		const int height = 360;
+
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+
+		plugin.SetFloatParameter( PT_WAGONS, countParam( 5 ) );
+		plugin.SetFloatParameter( PT_SIZE, sizeParam( 0.05f ) );
+		plugin.SetFloatParameter( PT_GAP, gapParam( 2.0f, false ) );
+		plugin.SetFloatParameter( PT_DWELL, dwellParam( 0.3f ) );
+		plugin.SetFloatParameter( PT_LANES, static_cast< float >( Lanes::Random ) );
+
+		Target target  = makeTarget( width, height );
+		int measured   = 0;
+		int wrong      = 0;
+		const double r = radiusPixels( 0.05, width, height );
+
+		for( float phase : { 3.1f, 3.37f, 3.62f, 3.9f, 7.45f } )
+		{
+			plugin.SetPhaseOverride( phase );
+			render( plugin, target );
+			const std::vector< unsigned char > image = readBytes( target );
+
+			const std::vector< Wagon > wagons = plugin.LastWagons();
+			for( const Wagon& w : wagons )
+			{
+				// Only shapes wholly on the frame and clear of every other one: a
+				// centroid cannot measure an overlap. See --place.
+				const double px = w.x * width;
+				const double py = w.y * height;
+				if( px < 2 * r || px > width - 2 * r || py < 2 * r || py > height - 2 * r )
+					continue;
+
+				bool alone = true;
+				for( const Wagon& o : wagons )
+					if( &o != &w && std::hypot( ( o.x - w.x ) * width, ( o.y - w.y ) * height ) < 3.0 * r )
+						alone = false;
+				if( !alone )
+					continue;
+
+				const Blob blob = measure( image, width, height, w.x, w.y, r );
+				const double dx = ( blob.x - w.x ) * width;
+				const double dy = ( blob.y - w.y ) * height;
+				++measured;
+				if( blob.weight <= 0.0 || std::hypot( dx, dy ) > 1.5 )
+				{
+					++wrong;
+					printf( "  FAIL lanes render: set %lld slot %d expected at %.1f,%.1f px, found %.1f,%.1f\n",
+					        w.set, w.slot, w.x * width, w.y * height, blob.x * width, blob.y * height );
+				}
+			}
+		}
+
+		releaseTarget( target );
+		plugin.DeInitGL();
+
+		if( measured < 8 )
+			fail( "render: only " + std::to_string( measured ) + " shapes could be measured" );
+		else if( wrong == 0 )
+			printf( "  ok   lanes render %d shapes on Random lanes, each within 1.5 px of the solver\n", measured );
+		failures += wrong;
+	}
+
+	printf( "lanes: %d failures\n", failures );
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
+// --matte
+//
+// The source's Mask Mode and Mix. Up to 0.1.0 both were declared and ignored,
+// which was reported from the field as "Mask Mode in Output doesn't seem to do
+// anything". Each is now checked on the picture.
+//---------------------------------------------------------------------------
+int matteCheck()
+{
+	const int width  = 480;
+	const int height = 270;
+	int failures     = 0;
+
+	struct Case
+	{
+		const char* name;
+		SourceOutput output;
+		float mix;
+		Rgba inside;
+		Rgba outside;
+	};
+
+	// The shape is deliberately red, shaded, shadowed, added and on a
+	// half-transparent grey background: a matte has to throw ALL of that away,
+	// and a matte that kept any of it would not key cleanly.
+	const Case cases[] = {
+		{ "Over",           SourceOutput::Normal,       1.0f, { 1, 0, 0, 1 }, { 0.5, 0.5, 0.5, 0.5 } },
+		{ "Matte",          SourceOutput::Matte,        1.0f, { 1, 1, 1, 1 }, { 0, 0, 0, 1 } },
+		{ "Inverse Matte",  SourceOutput::InverseMatte, 1.0f, { 0, 0, 0, 1 }, { 1, 1, 1, 1 } },
+		{ "Matte, Mix 0.5", SourceOutput::Matte,        0.5f, { 0.5, 0.5, 0.5, 0.5 }, { 0, 0, 0, 0.5 } },
+		{ "Over, Mix 0",    SourceOutput::Normal,       0.0f, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } },
+	};
+
+	Target target = makeTarget( width, height );
+
+	for( const Case& c : cases )
+	{
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+
+		configureSingle( plugin, Shape::Circle, 0.25f );
+		plugin.SetFloatParameter( PT_COLOUR_MODE, static_cast< float >( ColourMode::Solid ) );
+		plugin.SetFloatParameter( PT_SHAPE_R, 1.0f );
+		plugin.SetFloatParameter( PT_SHAPE_G, 0.0f );
+		plugin.SetFloatParameter( PT_SHAPE_B, 0.0f );
+		plugin.SetFloatParameter( PT_BACK_R, 1.0f );
+		plugin.SetFloatParameter( PT_BACK_G, 1.0f );
+		plugin.SetFloatParameter( PT_BACK_B, 1.0f );
+		plugin.SetFloatParameter( PT_BACK_OPACITY, 0.5f );
+		plugin.SetFloatParameter( PT_MASK_MODE, static_cast< float >( c.output ) );
+		plugin.SetFloatParameter( PT_MIX, c.mix );
+
+		// Shading and a shadow on everything except the plain Over case, whose
+		// "inside" has to be the flat red to be a useful reference.
+		if( c.output != SourceOutput::Normal )
+		{
+			plugin.SetFloatParameter( PT_SHADE, 1.0f );
+			plugin.SetFloatParameter( PT_SHADOW, 1.0f );
+			plugin.SetFloatParameter( PT_BLEND, static_cast< float >( Blend::Add ) );
+		}
+
+		float phase = 0.0f;
+		Wagon w;
+		if( !singleStanding( plugin, width, height, phase, w ) )
+		{
+			printf( "matte: the one shape never stands -- the test has gone stale\n" );
+			return 1;
+		}
+		plugin.SetPhaseOverride( phase );
+		render( plugin, target );
+		const std::vector< unsigned char > image = readBytes( target );
+
+		// Inside at the centre; outside well clear of the shape AND of where
+		// its shadow would fall.
+		const Rgba in  = pixelAt( image, width, height, w.x, w.y );
+		const Rgba out = pixelAt( image, width, height, 0.03, 0.05 );
+
+		auto same = []( const Rgba& a, const Rgba& b ) {
+			return near3( a, b[ 0 ], b[ 1 ], b[ 2 ], 0.04 ) && std::fabs( a[ 3 ] - b[ 3 ] ) < 0.04;
+		};
+
+		if( same( in, c.inside ) && same( out, c.outside ) )
+			printf( "  ok   matte %-15s inside %s, outside %s\n", c.name, describe( in ).c_str(), describe( out ).c_str() );
+		else
+		{
+			printf( "  FAIL matte %-15s inside %s (want %s), outside %s (want %s)\n", c.name,
+			        describe( in ).c_str(), describe( c.inside ).c_str(),
+			        describe( out ).c_str(), describe( c.outside ).c_str() );
+			++failures;
+		}
+
+		plugin.DeInitGL();
+	}
+
+	// The effect keeps its own four modes: Mask Mode must still list four
+	// there and three on the source.
+	{
+		ShuntPlugin source( false );
+		ShuntPlugin effect( true );
+		const unsigned int s = source.GetNumParamElements( PT_MASK_MODE );
+		const unsigned int e = effect.GetNumParamElements( PT_MASK_MODE );
+		if( s == 3 && e == 4 )
+			printf( "  ok   matte Mask Mode offers 3 on the source, 4 on the effect\n" );
+		else
+		{
+			printf( "  FAIL matte Mask Mode offers %u on the source and %u on the effect\n", s, e );
+			++failures;
+		}
+	}
+
+	releaseTarget( target );
+	printf( "matte: %d failures\n", failures );
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
+// --shadow
+//---------------------------------------------------------------------------
+int shadowCheck()
+{
+	const int width  = 480;
+	const int height = 480;
+	int failures     = 0;
+
+	Target target = makeTarget( width, height );
+
+	auto shoot = [&]( float shadow, float light, bool effect, MaskMode mode, Wagon& w ) {
+		ShuntPlugin plugin( effect );
+		std::vector< unsigned char > image;
+		if( !prepare( plugin, width, height ) )
+			return image;
+
+		configureSingle( plugin, Shape::Circle, 0.2f );
+		plugin.SetFloatParameter( PT_BACK_R, 0.5f );
+		plugin.SetFloatParameter( PT_BACK_G, 0.5f );
+		plugin.SetFloatParameter( PT_BACK_B, 0.5f );
+		plugin.SetFloatParameter( PT_SHADOW, shadow );
+		plugin.SetFloatParameter( PT_SHADOW_DISTANCE, 0.5f );  // half a radius
+		plugin.SetFloatParameter( PT_SHADOW_BLUR, 0.0f );
+		plugin.SetFloatParameter( PT_LIGHT, light );
+		if( effect )
+			plugin.SetFloatParameter( PT_MASK_MODE, static_cast< float >( mode ) );
+
+		float phase = 0.0f;
+		if( !singleStanding( plugin, width, height, phase, w ) )
+			return image;
+		plugin.SetPhaseOverride( phase );
+
+		GLuint clip = effect ? makeTestClip( width, height ) : 0;
+		render( plugin, target, clip );
+		image = readBytes( target );
+		if( clip != 0 )
+			glDeleteTextures( 1, &clip );
+		plugin.DeInitGL();
+		return image;
+	};
+
+	// Radius in frame units on this square frame: Size is a short-edge
+	// fraction, and both edges are the short edge.
+	const double r = 0.2;
+
+	//-----------------------------------------------------------------------
+	// Light from the top (0.25): the shadow falls DOWN. Just below the shape
+	// is darker than the background; just above it is not.
+	//-----------------------------------------------------------------------
+	for( float light : { 0.25f, 0.75f, 0.0f } )
+	{
+		Wagon w;
+		const std::vector< unsigned char > image = shoot( 1.0f, light, false, MaskMode::Over, w );
+		if( image.empty() )
+			return 1;
+
+		// The way the shadow should fall, on screen, y down.
+		const double a  = light * 6.28318531;
+		const double sx = -std::cos( a );
+		const double sy = std::sin( a );
+
+		const Rgba shadowSide = pixelAt( image, width, height, w.x + sx * r * 1.25, w.y + sy * r * 1.25 );
+		const Rgba lightSide  = pixelAt( image, width, height, w.x - sx * r * 1.25, w.y - sy * r * 1.25 );
+		const Rgba centre     = pixelAt( image, width, height, w.x, w.y );
+
+		// The shape over its own shadow: the part of the shape the shadow
+		// lies under is still the shape's white.
+		const Rgba overOwn = pixelAt( image, width, height, w.x + sx * r * 0.9, w.y + sy * r * 0.9 );
+
+		const bool ok = shadowSide[ 0 ] < 0.1 && near3( lightSide, 0.5, 0.5, 0.5, 0.03 )
+		                && centre[ 0 ] > 0.95 && overOwn[ 0 ] > 0.95;
+		if( ok )
+			printf( "  ok   shadow light %.2f  falls away from it (%.2f), not towards it (%.2f), under its own shape\n",
+			        light, shadowSide[ 0 ], lightSide[ 0 ] );
+		else
+		{
+			printf( "  FAIL shadow light %.2f  away %s, towards %s, centre %s, over own %s\n", light,
+			        describe( shadowSide ).c_str(), describe( lightSide ).c_str(),
+			        describe( centre ).c_str(), describe( overOwn ).c_str() );
+			++failures;
+		}
+	}
+
+	//-----------------------------------------------------------------------
+	// Shadow 0 is the 0.1.0 picture, pixel for pixel, whatever Distance and
+	// Blur say -- a composition saved before shadows existed must not change.
+	//-----------------------------------------------------------------------
+	{
+		Wagon w;
+		const std::vector< unsigned char > off = shoot( 0.0f, 0.25f, false, MaskMode::Over, w );
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+		configureSingle( plugin, Shape::Circle, 0.2f );
+		plugin.SetFloatParameter( PT_BACK_R, 0.5f );
+		plugin.SetFloatParameter( PT_BACK_G, 0.5f );
+		plugin.SetFloatParameter( PT_BACK_B, 0.5f );
+		float phase = 0.0f;
+		Wagon w2;
+		singleStanding( plugin, width, height, phase, w2 );
+		plugin.SetPhaseOverride( phase );
+		render( plugin, target );
+		const std::vector< unsigned char > plain = readBytes( target );
+		plugin.DeInitGL();
+
+		if( off == plain )
+			printf( "  ok   shadow 0        pixel-identical to a plugin that has never heard of shadows\n" );
+		else
+		{
+			printf( "  FAIL shadow 0 changed the picture\n" );
+			++failures;
+		}
+	}
+
+	//-----------------------------------------------------------------------
+	// Hide punches shapes out of the clip; a shadow drawn there would punch a
+	// second, offset hole. So Hide draws none.
+	//-----------------------------------------------------------------------
+	{
+		Wagon w;
+		const std::vector< unsigned char > withShadow = shoot( 1.0f, 0.25f, true, MaskMode::Hide, w );
+		const std::vector< unsigned char > without    = shoot( 0.0f, 0.25f, true, MaskMode::Hide, w );
+		if( withShadow == without )
+			printf( "  ok   shadow Hide     draws no shadow\n" );
+		else
+		{
+			printf( "  FAIL shadow Hide drew a shadow\n" );
+			++failures;
+		}
+	}
+
+	releaseTarget( target );
+	printf( "shadow: %d failures\n", failures );
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
+// --image
+//
+// "Load an image and that is applied to the shapes. Bonus points for being
+// able to load a folder of images and it chooses at random, or load a sprite
+// sheet and after declaring grid size it loads either a specific sprite into
+// all the objects or chooses a random sprite for each."
+//
+// The test images are written here, flat colours in known places, so that
+// every claim is a colour at a position.
+//---------------------------------------------------------------------------
+namespace imagetest
+{
+struct Colour
+{
+	unsigned char r, g, b;
+};
+
+const Colour kRed    = { 255, 0, 0 };
+const Colour kGreen  = { 0, 255, 0 };
+const Colour kBlue   = { 0, 0, 255 };
+const Colour kYellow = { 255, 255, 0 };
+
+/// A `cols` x `rows` grid of `cell` px flat colour blocks.
+bool writeGrid( const std::string& path, int cols, int rows, int cell, const std::vector< Colour >& colours )
+{
+	const int w = cols * cell;
+	const int h = rows * cell;
+	std::vector< unsigned char > rgba( static_cast< size_t >( w ) * h * 4 );
+	for( int y = 0; y < h; ++y )
+	{
+		for( int x = 0; x < w; ++x )
+		{
+			const Colour& c  = colours[ static_cast< size_t >( ( y / cell ) * cols + ( x / cell ) ) ];
+			unsigned char* p = &rgba[ ( static_cast< size_t >( y ) * w + x ) * 4 ];
+			p[ 0 ] = c.r;
+			p[ 1 ] = c.g;
+			p[ 2 ] = c.b;
+			p[ 3 ] = 255;
+		}
+	}
+	return writePng( path, w, h, rgba );
+}
+
+double colourDistance( const Rgba& a, const Colour& c )
+{
+	return std::fabs( a[ 0 ] - c.r / 255.0 ) + std::fabs( a[ 1 ] - c.g / 255.0 ) + std::fabs( a[ 2 ] - c.b / 255.0 );
+}
+
+/// Which of `palette` a sampled colour is, or -1.
+int which( const Rgba& a, const std::vector< Colour >& palette )
+{
+	for( size_t i = 0; i < palette.size(); ++i )
+		if( colourDistance( a, palette[ i ] ) < 0.15 )
+			return static_cast< int >( i );
+	return -1;
+}
+} // namespace imagetest
+
+int imageCheck()
+{
+	using namespace imagetest;
+
+	const int width  = 640;
+	const int height = 360;
+	int failures     = 0;
+
+	char dirTemplate[] = "/tmp/shtest-image-XXXXXX";
+	const char* made   = mkdtemp( dirTemplate );
+	if( made == nullptr )
+	{
+		printf( "image: could not make a temporary folder\n" );
+		return 1;
+	}
+	const std::string dir = made;
+
+	// Quadrants: red top left, green top right, blue bottom left, yellow bottom
+	// right -- so orientation, flip and rotation are each a different colour.
+	const std::vector< Colour > quadrants = { kRed, kGreen, kBlue, kYellow };
+	const std::string quad                = dir + "/quad.png";
+	writeGrid( quad, 2, 2, 64, quadrants );
+
+	// A sheet of four cells in one row, so a column/row mix-up is visible.
+	const std::string sheet = dir + "/sheet/sheet.png";
+	mkdir( ( dir + "/sheet" ).c_str(), 0755 );
+	writeGrid( sheet, 4, 1, 32, quadrants );
+
+	// A folder of three flat images and one thing that is not an image.
+	mkdir( ( dir + "/folder" ).c_str(), 0755 );
+	writeGrid( dir + "/folder/a.png", 1, 1, 24, { kRed } );
+	writeGrid( dir + "/folder/b.png", 1, 1, 40, { kGreen } );
+	writeGrid( dir + "/folder/c.png", 1, 1, 16, { kBlue } );
+	{
+		std::ofstream notes( dir + "/folder/notes.txt" );
+		notes << "not an image\n";
+	}
+
+	Target target = makeTarget( width, height );
+
+	auto fail = [&]( const std::string& what ) {
+		printf( "  FAIL image %s\n", what.c_str() );
+		++failures;
+	};
+
+	//-----------------------------------------------------------------------
+	// Single: the picture the right way up, on a square, whichever side the
+	// train comes from; turned by Angle and only by Angle.
+	//-----------------------------------------------------------------------
+	struct Orientation
+	{
+		Side side;
+		float angle;
+		// Which quadrant colour lands in each SCREEN quadrant: TL, TR, BL, BR.
+		int expect[ 4 ];
+		const char* what;
+	};
+
+	const Orientation orientations[] = {
+		{ Side::Left,   0.0f,  { 0, 1, 2, 3 }, "upright from the left" },
+		{ Side::Top,    0.0f,  { 0, 1, 2, 3 }, "upright from the top" },
+		{ Side::Right,  0.0f,  { 0, 1, 2, 3 }, "upright from the right" },
+		{ Side::Left,   0.25f, { 2, 0, 3, 1 }, "a quarter turn clockwise at Angle 0.25" },
+	};
+
+	for( const Orientation& o : orientations )
+	{
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+		configureSingle( plugin, Shape::Square, 0.3f );
+		plugin.SetFloatParameter( PT_SIDE, static_cast< float >( o.side ) );
+		plugin.SetFloatParameter( PT_ANGLE, o.angle );
+		plugin.SetTextParameter( PT_IMAGE_FILE, quad.c_str() );
+
+		float phase = 0.0f;
+		Wagon w;
+		if( !singleStanding( plugin, width, height, phase, w ) )
+		{
+			fail( "the one shape never stands" );
+			continue;
+		}
+		plugin.SetPhaseOverride( phase );
+		render( plugin, target );
+		const std::vector< unsigned char > image = readBytes( target );
+
+		// Half a radius out on each diagonal, in frame units.
+		const double rx = 0.3 * height / width * 0.5;
+		const double ry = 0.3 * 0.5;
+		const Rgba at[ 4 ] = {
+			pixelAt( image, width, height, w.x - rx, w.y - ry ),
+			pixelAt( image, width, height, w.x + rx, w.y - ry ),
+			pixelAt( image, width, height, w.x - rx, w.y + ry ),
+			pixelAt( image, width, height, w.x + rx, w.y + ry ),
+		};
+
+		bool ok = plugin.ImageCellsForTest() == 1;
+		for( int q = 0; q < 4; ++q )
+			ok = ok && which( at[ q ], quadrants ) == o.expect[ q ];
+
+		if( ok )
+			printf( "  ok   image Single %s\n", o.what );
+		else
+			fail( std::string( "Single " ) + o.what + ": " + describe( at[ 0 ] ) + " | " + describe( at[ 1 ] )
+			      + " | " + describe( at[ 2 ] ) + " | " + describe( at[ 3 ] ) + "  [" + plugin.ImageNoteForTest() + "]" );
+
+		plugin.DeInitGL();
+	}
+
+	//-----------------------------------------------------------------------
+	// Sheet, Pick Same: the cell Sprite names, on every shape, wrapping past
+	// the end. Sampled near the cell's edge as well as its middle: a missing
+	// half-texel inset shows as the neighbouring cell's colour there.
+	//-----------------------------------------------------------------------
+	for( int sprite : { 0, 1, 2, 3, 6 } )
+	{
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+		configureSingle( plugin, Shape::Square, 0.4f );
+		plugin.SetTextParameter( PT_IMAGE_FILE, sheet.c_str() );
+		plugin.SetFloatParameter( PT_IMAGE_SOURCE, static_cast< float >( ImageSource::Sheet ) );
+		plugin.SetFloatParameter( PT_COLUMNS, 4.0f );
+		plugin.SetFloatParameter( PT_ROWS, 1.0f );
+		plugin.SetFloatParameter( PT_SPRITE, static_cast< float >( sprite ) );
+
+		float phase = 0.0f;
+		Wagon w;
+		singleStanding( plugin, width, height, phase, w );
+		plugin.SetPhaseOverride( phase );
+		render( plugin, target );
+		const std::vector< unsigned char > image = readBytes( target );
+
+		const double rx    = 0.4 * height / width;
+		const Rgba middle  = pixelAt( image, width, height, w.x, w.y );
+		const Rgba nearEnd = pixelAt( image, width, height, w.x + rx * 0.985, w.y );
+
+		const int want = sprite % 4;
+		if( plugin.ImageCellsForTest() == 4 && which( middle, quadrants ) == want && which( nearEnd, quadrants ) == want )
+			printf( "  ok   image Sheet 4x1 Sprite %d shows cell %d, clean to its edge\n", sprite, want );
+		else
+			fail( "Sheet Sprite " + std::to_string( sprite ) + ": middle " + describe( middle ) + ", edge "
+			      + describe( nearEnd ) + "  [" + plugin.ImageNoteForTest() + "]" );
+
+		plugin.DeInitGL();
+	}
+
+	//-----------------------------------------------------------------------
+	// Sheet, Random and In Order, across a train and several sets.
+	//-----------------------------------------------------------------------
+	for( ImagePick pick : { ImagePick::InOrder, ImagePick::Random } )
+	{
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+		plugin.SetFloatParameter( PT_SHAPE, static_cast< float >( Shape::Square ) );
+		plugin.SetFloatParameter( PT_WAGONS, countParam( 4 ) );
+		plugin.SetFloatParameter( PT_SIZE, sizeParam( 0.07f ) );
+		plugin.SetFloatParameter( PT_TRAVEL, 0.9f );
+		plugin.SetFloatParameter( PT_GAP, gapParam( 2.5f, false ) );
+		plugin.SetFloatParameter( PT_DWELL, dwellParam( 0.9f ) );
+		plugin.SetTextParameter( PT_IMAGE_FILE, sheet.c_str() );
+		plugin.SetFloatParameter( PT_IMAGE_SOURCE, static_cast< float >( ImageSource::Sheet ) );
+		plugin.SetFloatParameter( PT_COLUMNS, 4.0f );
+		plugin.SetFloatParameter( PT_ROWS, 1.0f );
+		plugin.SetFloatParameter( PT_IMAGE_PICK, static_cast< float >( pick ) );
+		plugin.SetFloatParameter( PT_SPRITE, 1.0f );
+
+		const QueueParams probe = plugin.CurrentQueue( width, height );
+		float standing          = 0.0f;
+		if( !standingPhase( probe, 4, standing ) )
+		{
+			fail( "the train never stands" );
+			continue;
+		}
+
+		int seen[ 4 ]  = { 0, 0, 0, 0 };
+		int measured   = 0;
+		bool ok        = true;
+		std::map< long long, int > colourOfRelease;
+
+		for( int set = 0; set < 12; ++set )
+		{
+			plugin.SetPhaseOverride( standing + static_cast< float >( set ) );
+			render( plugin, target );
+			const std::vector< unsigned char > image = readBytes( target );
+
+			for( const Wagon& w : plugin.LastWagons() )
+			{
+				const int got = which( pixelAt( image, width, height, w.x, w.y ), quadrants );
+				++measured;
+				if( got < 0 )
+				{
+					ok = false;
+					continue;
+				}
+				++seen[ got ];
+
+				if( pick == ImagePick::InOrder )
+				{
+					// Independent of PickCell: the next release shows the next
+					// cell, starting from Sprite.
+					const int want = static_cast< int >( ( ( w.release + 1 ) % 4 + 4 ) % 4 );
+					if( got != want )
+						ok = false;
+				}
+				colourOfRelease[ w.release ] = got;
+			}
+		}
+
+		// A shape keeps its picture: the same release rendered at a different
+		// moment of its own stand shows the same cell.
+		plugin.SetPhaseOverride( standing + 0.01f );
+		render( plugin, target );
+		{
+			const std::vector< unsigned char > image = readBytes( target );
+			for( const Wagon& w : plugin.LastWagons() )
+			{
+				const auto found = colourOfRelease.find( w.release );
+				if( found != colourOfRelease.end()
+				    && which( pixelAt( image, width, height, w.x, w.y ), quadrants ) != found->second )
+					ok = false;
+			}
+		}
+
+		int distinct = 0;
+		for( int c = 0; c < 4; ++c )
+			distinct += seen[ c ] > 0 ? 1 : 0;
+
+		if( ok && distinct == 4 && measured == 48 )
+			printf( "  ok   image Sheet Pick %-8s 48 shapes across 12 sets, all four cells used%s\n",
+			        ImagePickName( pick ), pick == ImagePick::InOrder ? ", each release the next" : "" );
+		else
+			fail( std::string( "Sheet Pick " ) + ImagePickName( pick ) + ": " + std::to_string( distinct )
+			      + " cells used over " + std::to_string( measured ) + " shapes"
+			      + ( ok ? "" : ", and a shape showed the wrong cell" ) );
+
+		plugin.DeInitGL();
+	}
+
+	//-----------------------------------------------------------------------
+	// Folder: every image beside the chosen one, sorted by name, the text file
+	// ignored, each resampled into its own cell.
+	//-----------------------------------------------------------------------
+	for( int sprite : { 0, 1, 2 } )
+	{
+		ShuntPlugin plugin( false );
+		if( !prepare( plugin, width, height ) )
+			return 1;
+		configureSingle( plugin, Shape::Circle, 0.3f );
+		plugin.SetTextParameter( PT_IMAGE_FILE, ( dir + "/folder/b.png" ).c_str() );
+		plugin.SetFloatParameter( PT_IMAGE_SOURCE, static_cast< float >( ImageSource::Folder ) );
+		plugin.SetFloatParameter( PT_SPRITE, static_cast< float >( sprite ) );
+
+		float phase = 0.0f;
+		Wagon w;
+		singleStanding( plugin, width, height, phase, w );
+		plugin.SetPhaseOverride( phase );
+		render( plugin, target );
+		const std::vector< unsigned char > image = readBytes( target );
+
+		const std::vector< Colour > byName = { kRed, kGreen, kBlue };
+		const Rgba middle                  = pixelAt( image, width, height, w.x, w.y );
+		if( plugin.ImageCellsForTest() == 3 && which( middle, byName ) == sprite )
+			printf( "  ok   image Folder 3 images by name, Sprite %d shows %s  [%s]\n", sprite,
+			        sprite == 0 ? "a.png" : sprite == 1 ? "b.png" : "c.png", plugin.ImageNoteForTest().c_str() );
+		else
+			fail( "Folder Sprite " + std::to_string( sprite ) + ": " + describe( middle ) + ", "
+			      + std::to_string( plugin.ImageCellsForTest() ) + " cells  [" + plugin.ImageNoteForTest() + "]" );
+
+		plugin.DeInitGL();
+	}
+
+	//-----------------------------------------------------------------------
+	// Image Mix 0 is no picture at all; a file that is not an image, or no file,
+	// draws the plain shapes rather than nothing.
+	//-----------------------------------------------------------------------
+	{
+		struct Plain
+		{
+			const char* what;
+			std::string path;
+			float mix;
+		};
+		const Plain plains[] = {
+			{ "Image Mix 0",    quad, 0.0f },
+			{ "no file",        "", 1.0f },
+			{ "a file that is not an image", dir + "/folder/notes.txt", 1.0f },
+			{ "a path that is not there",    dir + "/missing.png", 1.0f },
+		};
+
+		for( const Plain& pl : plains )
+		{
+			ShuntPlugin plugin( false );
+			if( !prepare( plugin, width, height ) )
+				return 1;
+			configureSingle( plugin, Shape::Square, 0.3f );
+			plugin.SetTextParameter( PT_IMAGE_FILE, pl.path.c_str() );
+			plugin.SetFloatParameter( PT_IMAGE_MIX, pl.mix );
+
+			float phase = 0.0f;
+			Wagon w;
+			singleStanding( plugin, width, height, phase, w );
+			plugin.SetPhaseOverride( phase );
+			render( plugin, target );
+			const std::vector< unsigned char > image = readBytes( target );
+
+			const Rgba middle = pixelAt( image, width, height, w.x, w.y );
+			if( near3( middle, 1.0, 1.0, 1.0 ) )
+				printf( "  ok   image %-28s plain white shape%s%s%s\n", pl.what,
+				        plugin.ImageNoteForTest().empty() ? "" : "  [",
+				        plugin.ImageNoteForTest().c_str(),
+				        plugin.ImageNoteForTest().empty() ? "" : "]" );
+			else
+				fail( std::string( pl.what ) + ": " + describe( middle ) );
+
+			plugin.DeInitGL();
+		}
+	}
+
+	//-----------------------------------------------------------------------
+	// The path round-trips through the host's text interface -- the host reads
+	// it back to show in the inspector and to save in the composition.
+	//-----------------------------------------------------------------------
+	{
+		ShuntPlugin plugin( false );
+		plugin.SetTextParameter( PT_IMAGE_FILE, quad.c_str() );
+		const char* back = plugin.GetTextParameter( PT_IMAGE_FILE );
+		if( back != nullptr && quad == back )
+			printf( "  ok   image path round-trips through Get/SetTextParameter\n" );
+		else
+			fail( "the path did not round-trip" );
+	}
+
+	releaseTarget( target );
+	printf( "image: %d failures\n", failures );
+	return failures == 0 ? 0 : 1;
+}
+
+//---------------------------------------------------------------------------
 // --clock
 //
 // No GL. The host clock's unit is MEASURED against a real one rather than
@@ -2407,12 +3437,17 @@ void usage()
 		"  --order           the newest shape is drawn on top\n"
 		"  --round           circles stay round, and stay put, off 1:1\n"
 		"  --mask            the four effect mask modes\n"
+		"  --matte           the source's Mask Mode and Mix\n"
+		"  --lanes           each set on its own lane, and never on the last one\n"
+		"  --shadow          drop shadows fall away from the light\n"
+		"  --image           a picture, a folder, a sprite sheet, on the shapes\n"
 		"  --cost            ms/frame at 720p, 1080p and 4K\n"
 		"  --pipe            raw RGBA frames on stdin, raw RGBA frames on stdout\n"
 		"  --script PATH     parameter cues for --pipe: 'frame Parameter Name value'\n"
 		"  --fps F           the frame rate --pipe's clock runs at (default 30)\n\n"
 		"  --effect          use the effect variant\n"
 		"  --set \"Name=v\"    set any parameter by name\n"
+		"  --file \"Name=P\"   set a file parameter (the Image) by name\n"
 		"  --phase P         pin the phase (default)\n"
 		"  --time T          drive the real clock in seconds instead\n"
 		"  --size WxH        output size (default 1280x720)\n" );
@@ -2426,8 +3461,13 @@ int main( int argc, char** argv )
 	std::string shapesPath;
 	std::string sidesPath;
 	std::vector< std::string > settings;
+	std::vector< std::string > files;
 
 	bool wantList   = false;
+	bool wantMatte  = false;
+	bool wantLanes  = false;
+	bool wantShadow = false;
+	bool wantImage  = false;
 	bool wantClock  = false;
 	bool wantSpeed  = false;
 	bool wantPreset = false;
@@ -2463,6 +3503,8 @@ int main( int argc, char** argv )
 			sidesPath = argv[ ++i ];
 		else if( arg == "--set" && hasNext )
 			settings.push_back( argv[ ++i ] );
+		else if( arg == "--file" && hasNext )
+			files.push_back( argv[ ++i ] );
 		else if( arg == "--phase" && hasNext )
 			phase = std::stof( argv[ ++i ] );
 		else if( arg == "--time" && hasNext )
@@ -2489,6 +3531,10 @@ int main( int argc, char** argv )
 		else if( arg == "--order" )   wantOrder = true;
 		else if( arg == "--round" )   wantRound = true;
 		else if( arg == "--mask" )    wantMask = true;
+		else if( arg == "--matte" )   wantMatte = true;
+		else if( arg == "--lanes" )   wantLanes = true;
+		else if( arg == "--shadow" )  wantShadow = true;
+		else if( arg == "--image" )   wantImage = true;
 		else if( arg == "--cost" )    wantCost = true;
 		else if( arg == "--effect" )  wantEffect = true;
 		else if( arg == "--pipe" )    wantPipe = true;
@@ -2512,7 +3558,8 @@ int main( int argc, char** argv )
 	if( outPath.empty() && shapesPath.empty() && sidesPath.empty()
 	    && !wantList && !wantClock && !wantSpeed && !wantPreset && !wantTile
 	    && !wantPlace && !wantGap && !wantTravel && !wantDwell && !wantOrder
-	    && !wantRound && !wantMask && !wantCost && !wantPipe )
+	    && !wantRound && !wantMask && !wantCost && !wantPipe
+	    && !wantMatte && !wantLanes && !wantShadow && !wantImage )
 	{
 		usage();
 		return 2;
@@ -2532,7 +3579,8 @@ int main( int argc, char** argv )
 
 	const bool needsGL = !outPath.empty() || !shapesPath.empty() || !sidesPath.empty()
 	                     || wantPipe || wantList || wantPlace || wantGap || wantTravel || wantDwell
-	                     || wantOrder || wantRound || wantMask || wantCost;
+	                     || wantOrder || wantRound || wantMask || wantCost
+	                     || wantMatte || wantLanes || wantShadow || wantImage;
 	if( !needsGL )
 		return status;
 
@@ -2574,6 +3622,18 @@ int main( int argc, char** argv )
 	if( wantMask )
 		status |= maskCheck();
 
+	if( wantMatte )
+		status |= matteCheck();
+
+	if( wantLanes )
+		status |= lanesCheck();
+
+	if( wantShadow )
+		status |= shadowCheck();
+
+	if( wantImage )
+		status |= imageCheck();
+
 	if( wantCost )
 		status |= costCheck();
 
@@ -2595,6 +3655,15 @@ int main( int argc, char** argv )
 		for( const std::string& setting : settings )
 		{
 			if( !applySetting( plugin, setting ) )
+			{
+				CGLDestroyContext( context );
+				return 2;
+			}
+		}
+
+		for( const std::string& file : files )
+		{
+			if( !applyFile( plugin, file ) )
 			{
 				CGLDestroyContext( context );
 				return 2;

@@ -33,11 +33,16 @@ exactly as the two plugins do.
 Listed on the page itself, from the plugin's own list rather than a template, so
 it cannot quietly go out of date:
 
-- the clip picker does nothing in the source variant, which has no input at all;
+- the clip picker does nothing in the source variant, which has no input at all
+  — except as the stand-in for the **Image**, which is a file parameter in the
+  plugin and a path a page cannot read. **Folder** has no stand-in and behaves
+  as Single;
+- Columns, Rows and Sprite are integer parameters in the plugin; here they are
+  sliders that show the integer they land on;
 - Beat and Bar lock to a 120 BPM transport this page generates, which is the
   tempo the plugin falls back to when a host reports none;
 - Preset is an option parameter in the plugin, with Custom as element 0 and a
-  slider edit dropping back to it; here the same six presets are in the panel
+  slider edit dropping back to it; here the same seven presets are in the panel
   header;
 - a pixel Gap counts pixels of *this canvas*, so the resolution picker changes
   how much of the frame a given number of pixels is. That is the point of the

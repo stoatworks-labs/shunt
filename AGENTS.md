@@ -243,6 +243,91 @@ reserved words**, and a shader that will not compile surfaces only at runtime, a
 
 ---
 
+## What 0.2.0 added, and the traps in it
+
+All of it came from one field report — the operator who asked for the plugin,
+on the night 0.1.0 shipped. `docs/NOTES.md` has the report itself.
+
+**A declared control must move the picture in every plugin that declares it.**
+0.1.0 declared Mask Mode and Mix on the source "so a composition can move
+between plugins" and ignored both; `sweep.py` was told to skip them. That was
+the first thing reported. The ids still have to be shared, so the source now
+declares the same `PT_MASK_MODE` with *different elements* (Over / Matte /
+Inverse Matte, `SourceOutput` in Controls.h) whose values line up with the
+effect's, and the sweep covers both parameters on both plugins. Do not reach for
+EFFECT_ONLY again.
+
+**The new controls are after `PT_PRESET`, in their own groups.** `SetParamGroup`
+collapses runs, so Lanes cannot sit beside Across without moving every id after
+it, and a saved composition names parameters by id. Every one of them defaults
+to off: Shadow 0, Lanes Off, no Image. `--shadow` asserts Shadow 0 is
+pixel-identical to the 0.1.0 picture.
+
+**Source Mix is a blend factor, not an alpha.** See NOTES for the arithmetic.
+`ApplyBlend( blend, fade )` sets `glBlendColor` alpha and uses
+`GL_CONSTANT_ALPHA` as the source factor for Over and Add; `SourceFadesInBlend`
+says when, and under Max (which ignores factors) Mix goes back into the alpha.
+The effect always passes 1, which is the blend it always had. Reset
+`glBlendColor` at the end of Render — it is host state.
+
+**A matte forces Blend to Over and switches shading and shadows off.** That is
+`CurrentBlend()`, not a special case in the shader: white on black under Over is
+one colour whatever the overlap, which is all a matte is.
+
+**Lanes are a function of the SET, and the set is a function of (slot,
+phase).** `SetOf` is `floor( phase − slot/count )`, the same expression
+`SlotAge` takes the fraction of, so a shape changes set exactly as its age wraps
+— at release, off-stage. `LaneAcross` uses doubles because `set` counts every
+cycle since the composition opened. Random is half the band per set plus a
+jitter of at most `½ − s`: consecutive sets are provably between `s` and `1 − s`
+apart, with no running sum. `--lanes` checks all of that over thousands of sets
+and that lanes leave the motion *along* the track bit-identical.
+
+**Shadows are the even instances.** With `ShadowPass` on there are `2 × count`
+instances: `2i` is wagon i's shadow, `2i + 1` the wagon. That interleaving is the
+whole design — each shadow is drawn after every older shape and before its own.
+The offset is added after rotation (the light is on the screen), and the
+shadow's quad grows by `ShadowBlur`. Not drawn in Hide (it would punch a second
+hole) or in a matte.
+
+**The shading light is screen-fixed now** — `toLight` is rotated into shape
+space by `vRotation`. It used to be in shape space and turned with Angle and the
+entry side.
+
+**Image is a FILE parameter, and three things about that bite:**
+
+- `SetTextParameter` must return success for `PT_IMAGE_FILE`'s empty default.
+  instantiateGL pushes every default through the setters and deletes an instance
+  whose setter fails — the same trap as the About line, in a sharper form.
+- The path can arrive on a host thread; it is held under `textMutex` and read
+  on the render thread, which is the only place the decode and upload happen.
+  `GetTextParameter` hands back a member copy made under the lock.
+- The image is reloaded only when the key `(path, source, grid-if-sheet)`
+  changes. Columns and Rows are in the key only for a sheet, so dragging them
+  does not re-decode a folder of 36 photos.
+
+**Every picture is one texture and a list of cells** (`Imagery.cpp`). A folder
+is packed into square 512 px cells here — resampled in premultiplied space,
+because averaging straight alpha drags the colour of transparent texels into
+every edge. A sheet is never resampled. Every cell is its largest centred
+square, inset by half a texel so `GL_LINEAR` cannot reach the neighbouring cell
+(`--image` samples 1.5% in from a cell's edge to prove it). Not mipmapped, for
+the same reason as flipbook: a mip level averages across cells.
+
+**The picture is upright on screen, not in shape space.** Shape space faces the
+direction of travel, so a picture sampled there lies on its side for a train
+from the top. The shader turns the lookup back by `SideTurn` (the side's own
+rotation, from `SideRotation`), so it turns with Angle and only with Angle.
+
+**The Imagery sampler is never left on texture 0.** Apple's GL reports a sampler
+bound to 0 as "unloadable" on every run, even unsampled. A 1×1 white
+placeholder is bound instead, on unit 1; unit 0 stays the effect's clip.
+
+**The pick is by `Wagon::release`**, `set × count + slot` — unique across the
+run, so Random is a hash of it (on a different stream from the lane hash) and
+In Order is `release + Sprite`. A shape keeps its picture for its whole run
+because its release number does not change until it is off-stage again.
+
 ## Checking your work
 
 `tools/verify.sh` runs the lot. The ones that matter check different things:
@@ -266,6 +351,10 @@ reserved words**, and a shader that will not compile surfaces only at runtime, a
   its actual edge.
 - **`--order`** is the one claim that is about compositing rather than geometry.
 - **`--round`** is the two-coordinate-conventions trap, above.
+- **`--matte`**, **`--lanes`**, **`--shadow`** and **`--image`** are 0.2.0's,
+  one per request in the field report. `--image` writes its own test pictures
+  (quadrants, a 4×1 sheet, a folder with a text file in it), so every claim is
+  a flat colour at a known position.
 - **`--mask`** checks each of the four effect modes on the picture, inside a
   shape and outside it. Its reference clip is *captured* by rendering at zero
   opacity rather than predicted, because predicting it would mean
@@ -324,10 +413,12 @@ real transport.
   thicknesses is a function of the shape's size, so modulating size with audio
   would quietly stop that being true. `Size Variation` is absent for the same
   reason: the train is uniform by design.
-- **No lanes.** Several parallel trains would be genuinely useful for a pixel
-  map, and it would mean splitting `Count` between lanes — which breaks the
-  tiling the whole design rests on, because each lane would need its own
-  release cadence. It is a second instance on a second layer today.
+- **No parallel lanes.** Several trains running *at once* would be useful for a
+  pixel map, and would mean splitting `Count` between them — which breaks the
+  tiling the whole design rests on, because each would need its own release
+  cadence. It is a second instance on a second layer today. (0.2.0's **Lanes**
+  is a different thing: one train whose successive *sets* move across. It keeps
+  the tiling because the lane is a function of the set, not a second queue.)
 - **No per-shape shape.** One primitive per plugin instance, as in orrery.
 - **No continuous entry angle.** Four sides, because the request said "the side
   you choose" and because `Travel` as a percentage and `Gap` in pixels are both

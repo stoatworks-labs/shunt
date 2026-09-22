@@ -17,10 +17,6 @@ Licence: published derivations, used with credit
 
 The shape primitives are the standard analytic forms derived and published by Quilez. The normalisation constants, the motion, and everything else in the plugin are ours — but the distance functions at the centre of it are his derivations and are used as published.
 
-## Third-party code this project uses
-
-Libraries, SDKs and frameworks the project is built on or bundles.
-
 ### Shape primitives — Stoatworks orrery
 
 <https://github.com/stoatworks-labs/orrery>  
@@ -28,6 +24,10 @@ Licence: MIT
 Copyright: Stoatworks Labs
 
 Same author, same fleet, but a copy rather than a shared library: the eight distance functions, their normalisation, the shading, the About block and the diagnostics log were written for orrery and carried over here. Named so that a reader of either repo knows which one the primitives are maintained in.
+
+## Third-party code this project uses
+
+Libraries, SDKs and frameworks the project is built on or bundles.
 
 ### Resolume FFGL SDK
 
@@ -59,6 +59,15 @@ Arrives inside the FFGL submodule, under the SDK's CustomThumbnail sample.
 
 Part of the upstream SDK tree rather than something these plugins call directly — listed because it is present in the checkout.
 
+### stb_image
+
+<https://github.com/nothings/stb>  
+Licence: MIT or Public Domain (dual, at your option)  
+Copyright: Sean Barrett
+
+Single-header decoder vendored under external/stb/ and compiled into one translation unit.
+
+Decodes PNG, JPEG and GIF. A sprite-sheet player has to open whatever the operator exported.
 
 ## Getting this wrong
 

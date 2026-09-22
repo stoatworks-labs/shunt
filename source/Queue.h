@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "Controls.h"
 #include "Shapes.h"
 
 /**
@@ -170,6 +171,16 @@ struct Wagon
 	float age     = 0.0f;   ///< 0..1, how far through its own run this one is.
 	float depth   = 0.0f;   ///< Distance from the entry edge, in frame-span units.
 	bool standing = false;  ///< True while it is stopped at its slot.
+
+	/// Which set this shape belongs to: `floor( phase - slot / count )`. Every
+	/// shape released in one cycle shares a set, and so a lane.
+	long long set = 0;
+
+	/// A number no other shape in the whole run shares, counting releases in
+	/// order: `set * count + slot`. What an image is picked by, so a shape keeps
+	/// the same picture for the whole of its run and the next one along gets
+	/// the next.
+	long long release = 0;
 };
 
 /// The queue's parameters in physical units. `Controls.cpp` turns the host's
@@ -205,6 +216,11 @@ struct QueueParams
 	/// Where the run sits on the other axis, in frame space.
 	float across = 0.5f;
 
+	/// Whether each set moves to a new lane, and by how much when it steps.
+	/// `laneStep` is a fraction of the frame's cross span; see LaneAcross.
+	Lanes lanes    = Lanes::Off;
+	float laneStep = 0.0f;
+
 	/// Shape radius as a fraction of the short edge.
 	float size = 0.08f;
 
@@ -228,6 +244,10 @@ struct QueueParams
 	float opacity   = 1.0f;
 };
 
+/// The rotation, in radians clockwise on screen, that turns shape space to face
+/// the direction of travel for `side`. What Angle is added to.
+float SideRotation( Side side );
+
 /// True when the train runs along x (Left or Right), false when it runs along y.
 bool TravelsHorizontally( Side side );
 
@@ -245,6 +265,36 @@ void FrameRadius( float scale, float aspect, float& rx, float& ry );
 /// extents, stretches them, rotates them by `angle`, and projects onto the
 /// travel axis.
 float HalfThickness( const QueueParams& p );
+
+/// Half the shape's extent ACROSS the direction of travel, in frame-span units
+/// of that other axis. The same support-function construction as
+/// HalfThickness, projected onto the cross axis instead.
+float CrossHalfThickness( const QueueParams& p );
+
+/// The set `slot` belongs to at `p.phase`: `floor( phase - slot / count )`.
+long long SetOf( const QueueParams& p, int slot );
+
+/**
+    Where set `set` runs on the cross axis, in frame space.
+
+    With Lanes off this is `across`, exactly as it always was. Otherwise the
+    lanes wrap within the band where a whole shape stays on the frame — from
+    one cross half-thickness in from one edge to one in from the other — so
+    that "rolling over from top to bottom" puts the shape back fully on the
+    frame rather than half off the far edge.
+
+    **Step** adds `laneStep` per set, from wherever `across` puts set zero.
+
+    **Random** is the one that needed thought, because the request was for "a
+    random amount that would be more than the height of the object" and a
+    random walk is a running sum — state, or a loop back to set zero. It is
+    closed form instead: every set moves half the band plus a random jitter of
+    up to `0.5 - s` either way, where `s` is the shape's cross extent as a
+    fraction of the band. Consecutive sets are therefore between `s` and
+    `1 - s` apart round the wrap, which is exactly "never on top of the one
+    before", and the position of set n needs nothing but n.
+*/
+float LaneAcross( const QueueParams& p, long long set );
 
 /// Centre-to-centre spacing between standing shapes, in frame-span units along
 /// the direction of travel.

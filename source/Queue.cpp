@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace shunt
 {
@@ -30,20 +31,66 @@ float Clamp01( float v )
 /// to re-dial it every time they changed the entry side.
 float ScreenRotation( const QueueParams& p )
 {
-	float base = 0.0f;
-	switch( p.side )
-	{
-	case Side::Left:   base = 0.0f;        break;  // travelling +x
-	case Side::Right:  base = kPi;         break;  // travelling -x
-	case Side::Top:    base = kPi * 0.5f;  break;  // travelling +y, which is DOWN
-	case Side::Bottom: base = -kPi * 0.5f; break;  // travelling -y
-	default:           base = 0.0f;        break;
-	}
+	return SideRotation( p.side ) + p.angle * kTau;
+}
 
-	return base + p.angle * kTau;
+/// A well-mixed 0..1 from an integer, so a set's random lane is a pure function
+/// of its number. splitmix64's finaliser: every input bit reaches every output
+/// bit, which matters because consecutive set numbers differ in one or two.
+double Hash01( long long n )
+{
+	uint64_t x = static_cast< uint64_t >( n ) + 0x9E3779B97F4A7C15ull;
+	x = ( x ^ ( x >> 30 ) ) * 0xBF58476D1CE4E5B9ull;
+	x = ( x ^ ( x >> 27 ) ) * 0x94D049BB133111EBull;
+	x = x ^ ( x >> 31 );
+	return static_cast< double >( x >> 11 ) * ( 1.0 / 9007199254740992.0 );
+}
+
+double FractD( double x )
+{
+	return x - std::floor( x );
+}
+
+/// The rotated box's half extents on the frame's two axes, in frame-span units.
+void RotatedHalfExtents( const QueueParams& p, float& onX, float& onY )
+{
+	float ex = 1.0f;
+	float ey = 1.0f;
+	ShapeHalfExtents( p.shape, ex, ey );
+
+	// Stretch acts on the shape's own x before it is rotated, exactly as the
+	// vertex shader applies it.
+	const float hx = ex * std::max( 0.0f, p.stretch );
+	const float hy = ey;
+
+	const float theta = ScreenRotation( p );
+	const float c     = std::fabs( std::cos( theta ) );
+	const float s     = std::fabs( std::sin( theta ) );
+
+	// The support function of a rotated box, projected onto each axis. Rotation
+	// happens in shape space and the anisotropic frame scaling comes after it,
+	// which is why the two are applied in this order and not the other.
+	float rx = 0.0f;
+	float ry = 0.0f;
+	FrameRadius( p.size, p.aspect, rx, ry );
+
+	onX = rx * ( hx * c + hy * s );
+	onY = ry * ( hx * s + hy * c );
 }
 
 } // namespace
+
+float SideRotation( Side side )
+{
+	switch( side )
+	{
+	case Side::Left:   return 0.0f;         // travelling +x
+	case Side::Right:  return kPi;          // travelling -x
+	case Side::Top:    return kPi * 0.5f;   // travelling +y, which is DOWN
+	case Side::Bottom: return -kPi * 0.5f;  // travelling -y
+	default:           return 0.0f;
+	}
+}
 
 const char* SideName( Side side )
 {
@@ -102,29 +149,62 @@ void FrameRadius( float scale, float aspect, float& rx, float& ry )
 
 float HalfThickness( const QueueParams& p )
 {
-	float ex = 1.0f;
-	float ey = 1.0f;
-	ShapeHalfExtents( p.shape, ex, ey );
+	float onX = 0.0f;
+	float onY = 0.0f;
+	RotatedHalfExtents( p, onX, onY );
+	return TravelsHorizontally( p.side ) ? onX : onY;
+}
 
-	// Stretch acts on the shape's own x before it is rotated, exactly as the
-	// vertex shader applies it.
-	const float hx = ex * std::max( 0.0f, p.stretch );
-	const float hy = ey;
+float CrossHalfThickness( const QueueParams& p )
+{
+	float onX = 0.0f;
+	float onY = 0.0f;
+	RotatedHalfExtents( p, onX, onY );
+	return TravelsHorizontally( p.side ) ? onY : onX;
+}
 
-	const float theta = ScreenRotation( p );
-	const float c     = std::fabs( std::cos( theta ) );
-	const float s     = std::fabs( std::sin( theta ) );
+long long SetOf( const QueueParams& p, int slot )
+{
+	const int count = std::max( 1, p.count );
 
-	// The support function of a rotated box, projected onto the travel axis.
-	// Rotation happens in shape space and the anisotropic frame scaling comes
-	// after it, which is why the two are applied in this order and not the
-	// other.
-	float rx = 0.0f;
-	float ry = 0.0f;
-	FrameRadius( p.size, p.aspect, rx, ry );
+	// The same expression SlotAge takes the fraction of, so a shape's set turns
+	// over at exactly the instant its age wraps back to zero -- the instant it
+	// is released again from off-stage, where nobody can see it change lanes.
+	const double released = static_cast< double >( p.phase )
+	                        - static_cast< double >( slot ) / static_cast< double >( count );
+	return static_cast< long long >( std::floor( released ) );
+}
 
-	return TravelsHorizontally( p.side ) ? rx * ( hx * c + hy * s )
-	                                     : ry * ( hx * s + hy * c );
+float LaneAcross( const QueueParams& p, long long set )
+{
+	if( p.lanes == Lanes::Off )
+		return p.across;
+
+	// The band a whole shape fits in. Capped so a shape as big as the frame
+	// still has a band to wrap in rather than a division by zero.
+	const double e    = std::min( 0.45, static_cast< double >( CrossHalfThickness( p ) ) );
+	const double band = 1.0 - 2.0 * e;
+	const double u0   = ( static_cast< double >( p.across ) - e ) / band;
+
+	double u = 0.0;
+
+	if( p.lanes == Lanes::Step )
+	{
+		// Doubles, because `set` counts every cycle since the composition
+		// opened: at a few cycles a second that is six figures within a day,
+		// and a float step times a six-figure set loses the lane to rounding.
+		u = FractD( u0 + static_cast< double >( set ) * static_cast< double >( p.laneStep ) / band );
+	}
+	else
+	{
+		// See the header. Half the band per set, plus a jitter small enough that
+		// two consecutive sets can never come closer than one shape.
+		const double sep    = std::min( 1.0, 2.0 * e / band );
+		const double jitter = std::max( 0.0, 0.5 - sep );
+		u = FractD( u0 + 0.5 * static_cast< double >( set ) + ( Hash01( set ) - 0.5 ) * jitter );
+	}
+
+	return static_cast< float >( e + u * band );
 }
 
 float GapSpan( const QueueParams& p )
@@ -193,6 +273,9 @@ Wagon SolveSlot( const QueueParams& p, int slot )
 	const float dwell = Clamp01( p.dwell );
 	const float age   = SlotAge( p, slot );
 
+	const long long set = SetOf( p, slot );
+	const float across  = LaneAcross( p, set );
+
 	//-----------------------------------------------------------------------
 	// The run: in, stand, out. Three straight lines and two thresholds, which
 	// is the whole of the motion.
@@ -221,11 +304,11 @@ Wagon SolveSlot( const QueueParams& p, int slot )
 	//-----------------------------------------------------------------------
 	switch( p.side )
 	{
-	case Side::Left:   out.x = depth;        out.y = p.across;     break;
-	case Side::Right:  out.x = 1.0f - depth; out.y = p.across;     break;
-	case Side::Top:    out.x = p.across;     out.y = depth;        break;
-	case Side::Bottom: out.x = p.across;     out.y = 1.0f - depth; break;
-	default:           out.x = depth;        out.y = p.across;     break;
+	case Side::Left:   out.x = depth;        out.y = across;       break;
+	case Side::Right:  out.x = 1.0f - depth; out.y = across;       break;
+	case Side::Top:    out.x = across;       out.y = depth;        break;
+	case Side::Bottom: out.x = across;       out.y = 1.0f - depth; break;
+	default:           out.x = depth;        out.y = across;       break;
 	}
 
 	//-----------------------------------------------------------------------
@@ -293,6 +376,8 @@ Wagon SolveSlot( const QueueParams& p, int slot )
 	out.age      = age;
 	out.depth    = depth;
 	out.standing = standing;
+	out.set      = set;
+	out.release  = set * static_cast< long long >( count ) + slot;
 
 	return out;
 }

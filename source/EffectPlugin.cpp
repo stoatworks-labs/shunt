@@ -30,9 +30,9 @@ static CFFGLPluginInfo PluginInfo(
 	2,                                                // API major version number
 	1,                                                // API minor version number
 	0,                                                // Plugin major version number
-	1,                                                // Plugin minor version number
+	2,                                                // Plugin minor version number
 	FF_EFFECT,                                        // Plugin type
-	"A queue of shapes over the clip, or cut into it.\n\nShapes slide in from an edge, bank up a set distance apart, stand, and are drawn away. Gap can be set in multiples of the shape's own thickness or in absolute pixels.\n\nDwell is the one dial: turn it down and the front of the queue is still leaving as the back arrives; turn it up and the whole train stands before anything moves.\n\nStart from a Preset, at the bottom.",// Plugin description
+	"A queue of shapes over the clip, or cut into it.\n\nShapes slide in from an edge, bank up a set distance apart, stand, and are drawn away. Gap can be set in multiples of the shape's own thickness or in absolute pixels.\n\nDwell is the one dial: turn it down and the front of the queue is still leaving as the back arrives; turn it up and the whole train stands before anything moves.\n\nLanes, Shadow and Image are below the Preset: a new line for each set, drop shadows, and a picture, a folder or a sprite sheet on the shapes.\n\nStart from a Preset.",// Plugin description
 	"Shunt FFGL effect"                               // About
 );
 

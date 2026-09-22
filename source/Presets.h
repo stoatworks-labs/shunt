@@ -130,6 +130,16 @@ inline constexpr Preset kPresets[] = {
 	    /*Gap*/ 0.1f, /*Dwell*/ 0.55f, /*Speed*/ 0.5f,
 	    /*ColMode*/ 2, /*RGB*/ 0.2f, 0.6f, 1.0f, /*HueSpr*/ 0.35f, /*Opacity*/ 1.0f,
 	    /*Back*/ 0.0f, 0.0f, 0.0f, /*BackOp*/ 1.0f, /*Blend*/ 0, /*Shade*/ 1.0f } },
+
+	// Found in the field on the first night: a thick Ring with an Outline wide
+	// enough to stroke both of its edges, which leaves an outer ring and a dot
+	// in the middle -- a target. Overlapping, and shaded so the overlap reads.
+	{ "Bullseye",
+	  { /*Shape*/ 6, /*Size*/ 0.66f, /*Stretch*/ 0.5f, /*Angle*/ 0.0f, /*Round*/ 0.7f,
+	    /*Outline*/ 0.35f, /*Soft*/ 0.0f, /*Side*/ 0, /*Count*/ 0.315f, /*Travel*/ 0.8f,
+	    /*Gap*/ 0.15f, /*Dwell*/ 0.55f, /*Speed*/ 0.55f,
+	    /*ColMode*/ 1, /*RGB*/ 0.35f, 0.85f, 0.25f, /*HueSpr*/ 1.0f, /*Opacity*/ 1.0f,
+	    /*Back*/ 0.0f, 0.0f, 0.0f, /*BackOp*/ 1.0f, /*Blend*/ 0, /*Shade*/ 0.6f } },
 };
 
 inline constexpr int kCount = int( sizeof( kPresets ) / sizeof( kPresets[ 0 ] ) );

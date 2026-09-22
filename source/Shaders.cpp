@@ -60,27 +60,53 @@ const char* const kShapeVertexShader = R"(#version 410 core
 
 uniform vec4 Xform[ 64 ];   // centre.xy in frame space, radius, rotation
 uniform vec4 Tint[ 64 ];    // rgb, alpha
+uniform vec4 Cell[ 64 ];    // the shape's image rectangle: u0, v0, u1, v1
 uniform vec2 Resolution;
 uniform float Bound;
 uniform float Stretch;
 
+// Drop shadows ride in the same instanced draw as the shapes they belong to.
+// With ShadowPass on there are TWO instances per shape -- its shadow, then the
+// shape -- so each shadow is drawn after every older shape and before its own:
+// it falls on the shapes it has slid over and never on itself. Two draws, all
+// shadows then all shapes, would put every shadow under every shape and the
+// overlap the whole plugin is about would lose its depth.
+uniform int ShadowPass;
+uniform vec2 ShadowOffset;  // in shape radii, on SCREEN, y down
+uniform float ShadowBlur;   // in shape radii
+
 out vec2 vLocal;
 out vec4 vTint;
 out vec2 vClipUV;
+out vec4 vCell;
+out float vShadow;
+out float vRotation;
 
 void main()
 {
 	vec2 c = vec2( ( gl_VertexID & 1 ) == 0 ? -1.0 : 1.0,
 	               ( gl_VertexID & 2 ) == 0 ? -1.0 : 1.0 );
 
-	vec4 xf = Xform[ gl_InstanceID ];
-	vTint   = Tint[ gl_InstanceID ];
+	int index    = gl_InstanceID;
+	float shadow = 0.0;
+	if( ShadowPass == 1 )
+	{
+		index  = gl_InstanceID / 2;
+		shadow = ( gl_InstanceID % 2 ) == 0 ? 1.0 : 0.0;
+	}
+
+	vec4 xf   = Xform[ index ];
+	vTint     = Tint[ index ];
+	vCell     = Cell[ index ];
+	vShadow   = shadow;
+	vRotation = xf.w;
 
 	// Shape space: the primitive has unit radius and Stretch widens it on x.
 	// The quad has to cover the stretched, rounded, outlined, feathered shape,
-	// which is what Bound already accounts for.
-	vec2 local = c * vec2( Bound * Stretch, Bound );
-	vLocal     = local;
+	// which is what Bound already accounts for -- and a shadow's blur on top.
+	float reach = Bound + shadow * ShadowBlur;
+	vec2 local  = c * vec2( reach * Stretch, reach );
+	vLocal      = local;
 
 	float ca     = cos( xf.w );
 	float sa     = sin( xf.w );
@@ -97,7 +123,9 @@ void main()
 	                 ? vec2( Resolution.y / Resolution.x, 1.0 )
 	                 : vec2( 1.0, Resolution.x / Resolution.y );
 
-	vec2 framePos = xf.xy + rotated * xf.z * shortEdge;
+	// The shadow's offset is added AFTER the rotation: the light is fixed on
+	// the screen, so a shape turning does not swing its shadow round with it.
+	vec2 framePos = xf.xy + ( rotated + shadow * ShadowOffset ) * xf.z * shortEdge;
 
 	// The clip UV is carried from here rather than recovered from gl_FragCoord
 	// in the fragment shader, because gl_FragCoord is in window coordinates and
@@ -114,6 +142,9 @@ const char* const kShapeFragmentShader = R"(#version 410 core
 in vec2 vLocal;
 in vec4 vTint;
 in vec2 vClipUV;
+in vec4 vCell;
+in float vShadow;
+in float vRotation;
 
 uniform int ShapeKind;
 uniform float Stretch;
@@ -123,6 +154,27 @@ uniform float Softness;
 uniform float Shade;
 uniform float LightAngle;
 uniform int SampleMode;
+
+// The picture on the shapes. One texture whatever it came from -- a file, a
+// folder packed into a grid, a sprite sheet -- and a rectangle per shape in
+// vCell. Straight alpha.
+uniform sampler2D Imagery;
+uniform int HasImage;
+uniform float ImageMix;
+
+// The entry side's rotation, in radians. The image turns with Angle but not
+// with the side the train comes in from: shape space is rotated to face the
+// direction of travel, and a picture of a face should not lie on its side
+// because the train now falls from the top.
+uniform float SideTurn;
+
+uniform float ShadowAmount;
+uniform float ShadowBlur;
+
+// 0: the shapes' own colours. 1: white, for a matte. 2: black, for an inverse
+// matte. Coverage, opacity and the image's alpha all still apply -- only the
+// colour is replaced -- so a soft edge is a soft edge in the matte too.
+uniform int Matte;
 
 #ifdef SHUNT_EFFECT
 uniform sampler2D Clip;
@@ -267,14 +319,55 @@ void main()
 
 	float d = ( Outline > 0.001 ) ? abs( d0 ) - Outline * 0.5 : d0;
 
-	float feather  = max( aa, Softness * 2.0 );
+	bool isShadow = vShadow > 0.5;
+
+	// A shadow is the same silhouette with a wider feather: the blur spreads it
+	// by ShadowBlur either side of the edge, which is what the quad was grown
+	// by in the vertex shader.
+	float feather  = isShadow ? max( max( aa, Softness * 2.0 ), ShadowBlur * 2.0 )
+	                          : max( aa, Softness * 2.0 );
 	float coverage = 1.0 - smoothstep( -feather * 0.5, feather * 0.5, d );
 
 	if( coverage <= 0.0 )
 		discard;
 
+	//-----------------------------------------------------------------------
+	// The picture. Shape space is y-down with unit radius, so the square
+	// (-1..1) maps onto the cell with its top row at the top of the shape.
+	// Clamped to the cell, because the quad is bigger than the square -- for
+	// the rounding, the outline and the feather -- and past its edge the cell
+	// has neighbours.
+	//-----------------------------------------------------------------------
+	vec4 image = vec4( 1.0 );
+	if( HasImage == 1 )
+	{
+		vec2 p   = vLocal / st;
+		float cs = cos( SideTurn );
+		float sn = sin( SideTurn );
+		vec2 q   = vec2( p.x * cs - p.y * sn, p.x * sn + p.y * cs );
+		vec2 t   = clamp( q * 0.5 + 0.5, 0.0, 1.0 );
+		image    = texture( Imagery, mix( vCell.xy, vCell.zw, t ) );
+	}
+
+	float imageAlpha = ( HasImage == 1 ) ? mix( 1.0, image.a, ImageMix ) : 1.0;
+
+	if( isShadow )
+	{
+		// Black, at the shape's own opacity and the picture's alpha, so a sprite
+		// with a transparent surround casts the sprite's shadow and not the
+		// square's.
+		float shadowAlpha = coverage * vTint.a * imageAlpha * ShadowAmount;
+		if( shadowAlpha <= 0.0 )
+			discard;
+		fragColor = vec4( 0.0, 0.0, 0.0, shadowAlpha );
+		return;
+	}
+
 	vec3 rgb    = vTint.rgb;
-	float alpha = coverage * vTint.a;
+	float alpha = coverage * vTint.a * imageAlpha;
+
+	if( HasImage == 1 )
+		rgb = mix( vTint.rgb, image.rgb * vTint.rgb, ImageMix );
 
 #ifdef SHUNT_EFFECT
 	// 1 = Reveal (the clip, cut to the shapes), 2 = Colourise (the clip tinted).
@@ -305,7 +398,12 @@ void main()
 	// segments sliding over one another is what makes the overlap read as depth
 	// rather than as two flat shapes on top of each other.
 	//-----------------------------------------------------------------------
-	if( Shade > 0.001 )
+	if( Matte == 1 )
+		rgb = vec3( 1.0 );
+	else if( Matte == 2 )
+		rgb = vec3( 0.0 );
+
+	if( Shade > 0.001 && Matte == 0 )
 	{
 		// Central differences rather than fwidth: a screen-space derivative is
 		// one value per 2x2 quad, and these shapes are deliberately small, so
@@ -329,11 +427,22 @@ void main()
 
 		vec3 normal = vec3( outward * s, sqrt( max( 0.0, 1.0 - s * s ) ) );
 
+		// The light is fixed on the SCREEN, so it is turned back into shape
+		// space by the shape's own rotation. Up to 0.1.0 it was not, and the
+		// highlight swung round with Angle and with the entry side -- a train
+		// falling from the top was lit from the side -- which a drop shadow cast
+		// from the same Light control would have made obvious.
+		//
 		// The y flip is because shape space runs y-down to match frame space:
 		// without it, raising the Light control walks the highlight the wrong
 		// way round the shape.
-		float a     = LightAngle * 6.28318531;
-		vec3 toLight = normalize( vec3( cos( a ), -sin( a ), 0.65 ) );
+		float a      = LightAngle * 6.28318531;
+		vec2 screenL = vec2( cos( a ), -sin( a ) );
+		float cr     = cos( vRotation );
+		float sr     = sin( vRotation );
+		vec2 localL  = vec2( screenL.x * cr + screenL.y * sr,
+		                     -screenL.x * sr + screenL.y * cr );
+		vec3 toLight = normalize( vec3( localL, 0.65 ) );
 
 		float lambert = max( dot( normal, toLight ), 0.0 );
 		// Not `half`: that is a reserved word in GLSL and the compiler's
