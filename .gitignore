@@ -14,3 +14,4 @@
 
 # Session worktrees (see ~/.claude/CLAUDE.md)
 /.claude/worktrees/
+/build-verify/
