@@ -21,6 +21,38 @@ pixel map.
 hue spread along the train — one arriving alone, three closing up, eight
 standing. Rendered by `shtest`, the offline harness.</sub>
 
+<!-- downloads:start -->
+
+## Download
+
+**[v0.1.0](https://github.com/stoatworks-labs/shunt/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+
+<details>
+<summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-macos-universal.dmg) | 624 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 337 KB |
+
+</details>
+
+<details>
+<summary><b>Windows</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .exe installer | [`shunt-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-windows-x86_64-setup.exe) | 230 KB |
+| x64 · .zip archive | [`shunt-windows-x86_64.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-windows-x86_64.zip) | 232 KB |
+
+</details>
+
+All builds, checksums and release notes: [github.com/stoatworks-labs/shunt/releases](https://github.com/stoatworks-labs/shunt/releases).
+
+The Windows builds are unsigned, so SmartScreen warns once.
+
+<!-- downloads:end -->
+
 ## Where it came from
 
 This is not an idea that arrived from inside the workshop. A Resolume operator
