@@ -936,6 +936,7 @@ mountDemo({
   tagline: 'Shapes slide in, bank up a set distance apart, stand, and are drawn away.',
   repo: 'https://github.com/stoatworks-labs/shunt',
   page: 'https://stoatworks-labs.com/software/shunt/',
+  video: 'https://www.youtube.com/watch?v=m0wPwxjA5ls',
   showBackdrop: true,
   presets: PRESETS,
 

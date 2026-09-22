@@ -23,6 +23,21 @@ pixel map.
 hue spread along the train — one arriving alone, three closing up, eight
 standing. Rendered by `shtest`, the offline harness.</sub>
 
+**[Try it in your browser](https://shunt-demo.stoatworks-labs.com/)** — both
+plugins' own shaders in WebGL2 over a port of the queue, every control and all
+six presets, no install.
+
+[![Shunt — shapes that queue up and bank up, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=m0wPwxjA5ls)
+
+*[Watch it](https://www.youtube.com/watch?v=m0wPwxjA5ls) — 50 seconds: the
+caterpillar forming, newest on top, Dwell swept from one end of the dial to the
+other, a ladder whose 72-pixel gap was measured off the take at 72.00, the mask
+cutting the train into a clip, and the close from the other edge. Every frame is
+the real plugin's output: an FFGL plugin has no window, so the footage is
+rendered by this repository's own harness (`shtest --pipe`, driven by a cue
+sheet) rather than filmed off a screen. The clip is one of Resolume's own
+bundled demos.*
+
 <!-- downloads:start -->
 
 ## Download
