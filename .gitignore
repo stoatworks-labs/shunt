@@ -12,6 +12,6 @@
 *.xcodeproj/xcuserdata/
 /build-*/
 
-# Session worktrees (see ~/.claude/CLAUDE.md)
-/.claude/worktrees/
+# Session scratch: worktrees, launch configs, local settings
+/.claude/
 /build-verify/
