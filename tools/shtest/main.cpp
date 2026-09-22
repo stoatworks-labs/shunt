@@ -23,7 +23,10 @@
         --round           circles stay round, and stay put, off 1:1
         --mask            the four effect mask modes
         --cost            ms/frame at 720p, 1080p and 4K
-        --effect          use the effect variant (with --out, --list)
+        --pipe            raw RGBA frames in, raw RGBA frames out (see runPipe)
+        --script PATH     cues for --pipe: `frame  Parameter Name  value`
+        --fps F           the frame rate --pipe's clock runs at (default 30)
+        --effect          use the effect variant (with --out, --list, --pipe)
 
     ## What is measured on the picture and what is not
 
@@ -50,12 +53,17 @@
 #include <OpenGL/gl3.h>
 #include <zlib.h>
 
+#include <unistd.h>
+
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -2133,6 +2141,253 @@ int contactSheet( const std::string& path, bool byShape )
 	return 0;
 }
 
+//---------------------------------------------------------------------------
+// --pipe: raw RGBA frames in, raw RGBA frames out, through the real plugin.
+//
+// The fleet's frame format and the fleet's cue-sheet format, identical to
+// galvo's gvtest, orrery's and porthole's on purpose, so one filming script can
+// drive any of them:
+//
+//     ffmpeg -i in.mov -f rawvideo -pix_fmt rgba - \
+//       | shtest --pipe --size 1920x1080 --fps 30 [--effect] [--script cues.txt] \
+//       | ffmpeg -f rawvideo -pix_fmt rgba -s 1920x1080 -i - out.mov
+//
+// `--script` is a plain text file of `frame  Parameter Name  value` lines.
+// Values are held before the first key and after the last, and linearly
+// interpolated between -- so an OPTION parameter keyed at two frames far apart
+// passes through every element between them. Key an option one frame apart to
+// cut it, and give every parameter that must not move a hold key at the END of
+// each section it has to stay put in.
+//
+// The source plugin has no input, but it still reads a frame per frame out:
+// the stream is the clock. That is what lets one filming pipeline drive the
+// source and the mask identically, and it means a stall in ffmpeg cannot speed
+// the procession up -- the phase comes from the frame index, not the wall.
+//---------------------------------------------------------------------------
+using Track = std::vector< std::pair< int, float > >;
+
+std::map< std::string, Track > loadScript( const std::string& path, std::string& error )
+{
+	std::map< std::string, Track > tracks;
+	std::ifstream file( path );
+	if( !file )
+	{
+		error = "cannot open " + path;
+		return tracks;
+	}
+
+	std::string line;
+	int lineNumber = 0;
+	while( std::getline( file, line ) )
+	{
+		++lineNumber;
+		const size_t hash = line.find( '#' );
+		if( hash != std::string::npos )
+			line.erase( hash );
+		std::istringstream in( line );
+
+		int frame = 0;
+		if( !( in >> frame ) )
+			continue;//blank or comment
+
+		// The name is everything up to the last token, because parameters have
+		// spaces in them ("Gap Units") and the value never does.
+		std::vector< std::string > words;
+		std::string word;
+		while( in >> word )
+			words.push_back( word );
+		if( words.size() < 2 )
+		{
+			error = path + ":" + std::to_string( lineNumber ) + ": expected `frame Parameter Name value`";
+			return {};
+		}
+
+		const float value = std::strtof( words.back().c_str(), nullptr );
+		words.pop_back();
+		std::string name = words.front();
+		for( size_t i = 1; i < words.size(); ++i )
+			name += " " + words[ i ];
+
+		tracks[ name ].emplace_back( frame, value );
+	}
+
+	for( auto& entry : tracks )
+		std::sort( entry.second.begin(), entry.second.end() );
+	return tracks;
+}
+
+float valueAt( const Track& track, int frame )
+{
+	if( track.empty() )
+		return 0.0f;
+	if( frame <= track.front().first )
+		return track.front().second;
+	if( frame >= track.back().first )
+		return track.back().second;
+
+	for( size_t i = 1; i < track.size(); ++i )
+	{
+		if( frame <= track[ i ].first )
+		{
+			const auto& a    = track[ i - 1 ];
+			const auto& b    = track[ i ];
+			const float span = static_cast< float >( b.first - a.first );
+			const float t    = span > 0.0f ? ( static_cast< float >( frame - a.first ) / span ) : 1.0f;
+			return a.second + ( b.second - a.second ) * t;
+		}
+	}
+	return track.back().second;
+}
+
+int runPipe( int width, int height, double fps, const std::string& scriptPath,
+             const std::vector< std::string >& settings, bool effect )
+{
+	ShuntPlugin plugin( effect );
+	if( !prepare( plugin, width, height ) )
+		return 1;
+
+	for( const std::string& setting : settings )
+	{
+		if( !applySetting( plugin, setting ) )
+		{
+			plugin.DeInitGL();
+			return 2;
+		}
+	}
+
+	// Resolve the script's names to indices once, up front, and refuse to run
+	// on a name that is not a parameter. A misspelled name that silently did
+	// nothing would produce a take that looks deliberate and is wrong: the reel
+	// would hold whatever the default was, with a caption over it describing
+	// the control that never moved.
+	std::map< unsigned int, Track > automation;
+	if( !scriptPath.empty() )
+	{
+		std::string error;
+		const std::map< std::string, Track > tracks = loadScript( scriptPath, error );
+		if( !error.empty() )
+		{
+			fprintf( stderr, "%s\n", error.c_str() );
+			plugin.DeInitGL();
+			return 2;
+		}
+
+		const std::map< std::string, unsigned int > byName = parameterIndex( plugin );
+		for( const auto& entry : tracks )
+		{
+			const auto found = byName.find( entry.first );
+			if( found == byName.end() )
+			{
+				fprintf( stderr, "script names '%s', which is not a parameter (try --list)\n",
+				         entry.first.c_str() );
+				plugin.DeInitGL();
+				return 2;
+			}
+			automation[ found->second ] = entry.second;
+		}
+	}
+
+	// The real clock, in seconds, said out loud -- not a pinned phase. Speed
+	// and Sync are part of what a video shows, and the phase anchor that keeps
+	// a Speed change from teleporting the train is part of what it proves.
+	plugin.SetClockScaleForTest( 1.0 );
+
+	GLuint input = 0;
+	if( effect )
+	{
+		glGenTextures( 1, &input );
+		glBindTexture( GL_TEXTURE_2D, input );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+
+	Target target = makeTarget( width, height );
+	std::vector< unsigned char > frame( static_cast< size_t >( width ) * height * 4 );
+	std::vector< unsigned char > upload( frame.size() );
+
+	int status = 0;
+	for( int index = 0;; ++index )
+	{
+		// A short read is normal on a pipe, so fill the frame before doing
+		// anything with it. A partial frame at the end is the end of the stream.
+		size_t filled = 0;
+		while( filled < frame.size() )
+		{
+			const ssize_t got = read( STDIN_FILENO, frame.data() + filled, frame.size() - filled );
+			if( got <= 0 )
+				break;
+			filled += static_cast< size_t >( got );
+		}
+		if( filled < frame.size() )
+			break;
+
+		for( const auto& track : automation )
+			plugin.SetFloatParameter( track.first, valueAt( track.second, index ) );
+
+		const double seconds = static_cast< double >( index ) / fps;
+		plugin.SetTime( seconds );
+		// 120 BPM, four to the bar: the tempo the plugin falls back to when a
+		// host reports none, and the bar position a real transport would hand
+		// over at that tempo. Bar sync is therefore filmable, and honest about
+		// being a synthetic transport rather than a track.
+		const double barPhase = seconds / 2.0 - std::floor( seconds / 2.0 );
+		plugin.SetBeatInfo( 120.0f, static_cast< float >( barPhase ) );
+
+		if( effect )
+		{
+			// A raw frame arrives top row first, straight alpha. GL wants the
+			// bottom row first, and Resolume hands a plugin PREMULTIPLIED alpha
+			// -- the shaders assume it -- so the clip is flipped and
+			// premultiplied on the way in, the way the host would have done it.
+			const size_t stride = static_cast< size_t >( width ) * 4;
+			for( int y = 0; y < height; ++y )
+			{
+				const unsigned char* src = frame.data() + static_cast< size_t >( height - 1 - y ) * stride;
+				unsigned char* dst       = upload.data() + static_cast< size_t >( y ) * stride;
+				for( int x = 0; x < width; ++x )
+				{
+					const unsigned a = src[ x * 4 + 3 ];
+					dst[ x * 4 + 0 ] = static_cast< unsigned char >( ( src[ x * 4 + 0 ] * a + 127 ) / 255 );
+					dst[ x * 4 + 1 ] = static_cast< unsigned char >( ( src[ x * 4 + 1 ] * a + 127 ) / 255 );
+					dst[ x * 4 + 2 ] = static_cast< unsigned char >( ( src[ x * 4 + 2 ] * a + 127 ) / 255 );
+					dst[ x * 4 + 3 ] = static_cast< unsigned char >( a );
+				}
+			}
+			glBindTexture( GL_TEXTURE_2D, input );
+			glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, upload.data() );
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		}
+
+		render( plugin, target, input );
+
+		const std::vector< unsigned char > out = flipRows( readBytes( target ), width, height );
+		size_t written = 0;
+		while( written < out.size() )
+		{
+			const ssize_t put = write( STDOUT_FILENO, out.data() + written, out.size() - written );
+			if( put <= 0 )
+				break;
+			written += static_cast< size_t >( put );
+		}
+		if( written < out.size() )
+		{
+			status = 0;//the consumer went away; that is how a pipe ends
+			break;
+		}
+	}
+
+	releaseTarget( target );
+	if( input != 0 )
+		glDeleteTextures( 1, &input );
+	plugin.DeInitGL();
+	return status;
+}
+
 void usage()
 {
 	printf(
@@ -2152,7 +2407,10 @@ void usage()
 		"  --order           the newest shape is drawn on top\n"
 		"  --round           circles stay round, and stay put, off 1:1\n"
 		"  --mask            the four effect mask modes\n"
-		"  --cost            ms/frame at 720p, 1080p and 4K\n\n"
+		"  --cost            ms/frame at 720p, 1080p and 4K\n"
+		"  --pipe            raw RGBA frames on stdin, raw RGBA frames on stdout\n"
+		"  --script PATH     parameter cues for --pipe: 'frame Parameter Name value'\n"
+		"  --fps F           the frame rate --pipe's clock runs at (default 30)\n\n"
 		"  --effect          use the effect variant\n"
 		"  --set \"Name=v\"    set any parameter by name\n"
 		"  --phase P         pin the phase (default)\n"
@@ -2183,6 +2441,9 @@ int main( int argc, char** argv )
 	bool wantMask   = false;
 	bool wantCost   = false;
 	bool wantEffect = false;
+	bool wantPipe   = false;
+	std::string scriptPath;
+	double fps      = 30.0;
 
 	float phase    = 0.0f;
 	float hostTime = -1.0f;   // negative means "pin the phase instead"
@@ -2230,6 +2491,11 @@ int main( int argc, char** argv )
 		else if( arg == "--mask" )    wantMask = true;
 		else if( arg == "--cost" )    wantCost = true;
 		else if( arg == "--effect" )  wantEffect = true;
+		else if( arg == "--pipe" )    wantPipe = true;
+		else if( arg == "--script" && hasNext )
+			scriptPath = argv[ ++i ];
+		else if( arg == "--fps" && hasNext )
+			fps = std::stod( argv[ ++i ] );
 		else if( arg == "--help" || arg == "-h" )
 		{
 			usage();
@@ -2246,7 +2512,7 @@ int main( int argc, char** argv )
 	if( outPath.empty() && shapesPath.empty() && sidesPath.empty()
 	    && !wantList && !wantClock && !wantSpeed && !wantPreset && !wantTile
 	    && !wantPlace && !wantGap && !wantTravel && !wantDwell && !wantOrder
-	    && !wantRound && !wantMask && !wantCost )
+	    && !wantRound && !wantMask && !wantCost && !wantPipe )
 	{
 		usage();
 		return 2;
@@ -2265,7 +2531,7 @@ int main( int argc, char** argv )
 		status |= tileCheck();
 
 	const bool needsGL = !outPath.empty() || !shapesPath.empty() || !sidesPath.empty()
-	                     || wantList || wantPlace || wantGap || wantTravel || wantDwell
+	                     || wantPipe || wantList || wantPlace || wantGap || wantTravel || wantDwell
 	                     || wantOrder || wantRound || wantMask || wantCost;
 	if( !needsGL )
 		return status;
@@ -2281,6 +2547,13 @@ int main( int argc, char** argv )
 	{
 		ShuntPlugin plugin( wantEffect );
 		status |= listParameters( plugin );
+	}
+
+	if( wantPipe )
+	{
+		const int piped = runPipe( width, height, fps, scriptPath, settings, wantEffect );
+		CGLDestroyContext( context );
+		return piped;
 	}
 
 	if( wantPlace )

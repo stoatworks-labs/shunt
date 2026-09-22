@@ -21,6 +21,11 @@ draw order or the blend state.
 - Contact sheets: `./build/shtest --shapes /tmp/shapes.png --sides /tmp/sides.png`
 - Set anything by name: `--set "Shape=7" --set "Dwell=0.9"`
 - A factory preset by number: `--set "Preset=6"` (0 is Custom)
+- Film it: `--pipe --size 1920x1080 --fps 30 [--effect] [--script cues.txt]` —
+  raw RGBA frames on stdin, raw RGBA on stdout, the fleet's cue-sheet format
+  (`frame  Parameter Name  value`). The source reads a frame per frame out as
+  its clock. The project video is rendered with it:
+  `stoatworks-backend/video/projects/shunt/render.py`.
 
 ## Verify
 - Everything: `tools/verify.sh`
@@ -40,13 +45,16 @@ draw order or the blend state.
   `../plugin-bench/arena/gate.sh shunt` — loads the actual `.dll` on the win-lab
   VM and checks registration, the control surface the host sees, FFGL's 16-char
   name truncation, and that every control still moves the picture. Takes
-  minutes, needs the VM, and is deliberately NOT in `tools/verify.sh`. **Not yet
-  run for this repo** — see Status in the README.
+  minutes, needs the VM, and is deliberately NOT in `tools/verify.sh`. Last run
+  2026-09-22 against v0.1.0: 15 passed, 0 failed — see AGENTS.md for why most
+  controls come back inconclusive rather than live.
 
 ## Browser demo
 - `demo/` is served at `shunt-demo.stoatworks-labs.com` by this repo's own
-  Worker. No CI job deploys it: `cf-run npx wrangler deploy` from the repo root,
-  then verify by CONTENT, because a stale page answers 200.
+  Worker. `.github/workflows/deploy.yml` deploys it on every push to main that
+  touches it, and proves the page changed; by hand it is
+  `cf-run npx wrangler deploy` from the repo root. Either way, verify by
+  CONTENT, because a stale page answers 200.
 - `demo/plugin.js` carries the shader text a second time and ports `Queue.cpp`.
   After editing `source/Shaders.cpp`: `python3 demo/tools/sync_shaders.py`.
   `demo/tools/check_shaders.py` proves the two copies agree and runs in

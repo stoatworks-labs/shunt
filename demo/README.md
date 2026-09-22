@@ -45,9 +45,10 @@ it cannot quietly go out of date:
 
 ## Deploying it
 
-A static-assets Cloudflare Worker. **No CI job deploys it**, and
-`gen-downloads.py` does not know it exists, so a change committed here stays
-invisible to users until somebody runs, from the repo root:
+A static-assets Cloudflare Worker. `.github/workflows/deploy.yml` deploys it on
+every push to main that touches it, using the repo's `CLOUDFLARE_API_TOKEN`
+secret, and then proves the live page changed. `gen-downloads.py` does not know
+it exists. By hand, from the repo root:
 
 ```bash
 cf-run npx wrangler deploy

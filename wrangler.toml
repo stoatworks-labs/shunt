@@ -12,10 +12,10 @@
 #
 #   cf-run npx wrangler deploy
 #
-# Nothing else deploys it -- no CI job, and `gen-downloads.py` does not know it
-# exists -- so a change to `demo/plugin.js` stays invisible to users until this
-# is run by hand. Verify by CONTENT, never by status code; a stale page returns
-# a cheerful 200:
+# `.github/workflows/deploy.yml` runs exactly that on every push to main, with
+# the repo's CLOUDFLARE_API_TOKEN secret, and checks the live page changed.
+# `gen-downloads.py` does not know the demo exists. Verify by CONTENT, never by
+# status code; a stale page returns a cheerful 200:
 #
 #   curl -s 'https://shunt-demo.stoatworks-labs.com/?cb=1' | grep -o '<title>[^<]*'
 #

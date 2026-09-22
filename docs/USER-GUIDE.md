@@ -10,14 +10,16 @@ Avenue — for animated masks, and for chroma animations driving a pixel map.
 *Twelve discs from the left, overlapping by a third of their own thickness — one
 arriving alone, three closing up, eight standing.*
 
-> **Before you rely on this:** released at **v0.1.0**, and it has **never been
-> loaded into Resolume**. It loads and renders in an FFGL host (`oxbow`, on
-> macOS), and every geometric claim below is measured on rendered frames rather
-> than asserted — where each shape landed, to 1.5 px; how far apart the standing
-> ones are, to a pixel; how long one stands, in frames; which of two overlapping
-> shapes is on top. But an FFGL host is not Arena, no Windows binary has been
-> run anywhere, and the numbers come from one Mac and one GPU. **Try it on a
-> spare layer first**, and please report anything that misbehaves.
+> **Before you rely on this:** released at **v0.1.0**, and honestly early. Every
+> geometric claim below is measured on rendered frames rather than asserted —
+> where each shape landed, to 1.5 px; how far apart the standing ones are, to a
+> pixel; how long one stands, in frames; which of two overlapping shapes is on
+> top. **Both plugins load and run in Resolume Arena 7.27.1**: the shipped
+> Windows build was checked in a real Arena, where both register correctly, all
+> 38 controls on each match what the plugin declares, and both render. That run
+> was on software rendering, so it says nothing about a GPU, and the plugin has
+> not yet been used in a show. **Try it on a spare layer first**, and please
+> report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human
 > author.

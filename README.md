@@ -6,9 +6,11 @@
 > headless GL context: it renders frames and measures, in pixels, where every
 > shape actually landed, how far apart the standing ones really are, how long
 > one really stands still, and which of two overlapping shapes is really on top
-> (see [Status](#status)). **Neither plugin has ever been loaded into Resolume.**
-> They do load and render in an FFGL host — `oxbow`, on macOS — but that is not
-> Arena. Check them in your own rig before trusting them in a show.
+> (see [Status](#status)). Both plugins load and run in **Resolume Arena
+> 7.27.1**: the shipped v0.1.0 Windows build was checked in a real Arena on
+> 2026-09-22 — registration, every control the host reports, and a rendered frame
+> from each. That was on software rendering, and nothing here has been used in a
+> show yet. Check it in your own rig before trusting it in one.
 
 Shapes slide in from an edge, bank up a set distance apart, stand, and are
 drawn away again — for [Resolume](https://resolume.com) Arena and Avenue, as a
@@ -32,8 +34,8 @@ standing. Rendered by `shtest`, the offline harness.</sub>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-macos-universal.dmg) | 624 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 337 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-macos-universal.dmg) | 422 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 369 KB |
 
 </details>
 
@@ -49,7 +51,7 @@ standing. Rendered by `shtest`, the offline harness.</sub>
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/shunt/releases](https://github.com/stoatworks-labs/shunt/releases).
 
-The Windows builds are unsigned, so SmartScreen warns once.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
@@ -204,7 +206,7 @@ restart Resolume.
 
 ## Status
 
-**v0.1.0, and honestly early.** Everything below is measured by
+**v0.1.0, and honestly early.** Everything in the first table is measured by
 `tools/verify.sh` on an Apple M4 Max, macOS 26.4.1 — a fresh universal Release
 build, then real frames rendered and measured:
 
@@ -226,19 +228,33 @@ build, then real frames rendered and measured:
 | Universal binary | `lipo` reports `x86_64 arm64` on both, `plugMain` exported, ad-hoc signs |
 | Render cost | **0.30 ms/frame at 720p, 0.35 at 1080p, 0.52 at 4K** |
 
+And in Resolume itself. On 2026-09-22 the **shipped v0.1.0 Windows build** — the
+DLLs from the release page, not a local build — was loaded into Resolume Arena
+7.27.1 (build 15990) on win-lab, an x64 Windows 11 VM, by the fleet's Arena
+release gate. 15 checks, all passed:
+
+| Check | Result |
+| --- | --- |
+| Load and register | both DLLs load; `SW Shunt` registers as a **source**, `SH01`, and `SW Shunt Mask` as an **effect**, `SH02` |
+| Control surface | all **38** controls on each plugin match what the plugin declares — name, order, type, 0..1 range and default. Resolume hoists the mask's `Opacity` to the top of its list — Orrery Mask shows the same |
+| Name truncation | four names sit at exactly the 16-character FFGL limit — `Background_Green`, `Background Alpha`, `Source on GitHub`, `Support the work` — and all four arrive complete |
+| Render | both plugins produce a frame with content |
+| Controls | none dead. **13** of the source's controls and **10** of the mask's were shown to move the picture in Arena; the rest were *inconclusive*, not dead — the train never stops moving at the default Speed, and a subtle control's effect cannot be separated from that motion at the gate's 320×240. `tools/sweep.py` shows all 33 live offline |
+| Clean | no shader or error lines in Arena's log for the run, and Arena survived it on one process |
+
 What that does **not** cover, and it is the important half:
 
-- **Neither plugin has ever been loaded into Resolume.** `oxbow` is an FFGL host
-  and it is not Arena. How the seven parameter groups land in Resolume's
-  inspector has not been looked at, and whether `Bar` sync locks against a real
-  transport still needs a real transport.
-- **No Windows build has been run anywhere.** CI cross-builds one; nothing has
-  loaded it.
+- **The Arena run was on software rendering.** win-lab has no GPU — Arena runs on
+  Mesa llvmpipe there — so it says nothing about an NVIDIA or AMD driver, and
+  nothing about speed.
+- **It has not been used in a show, or on macOS in Arena.** How the seven
+  parameter groups read in the inspector has not been reviewed by a person, and
+  whether `Bar` sync locks against a real transport still needs a real
+  transport.
 - **No OpenFX build.** The effect would port — the queue is plain C++ and the
   per-pixel work is eight distance functions — but it is not done, so there is
   nothing here for Resolve, Nuke or Vegas.
-- The numbers above are one machine, one GPU. They say nothing about an NVIDIA
-  or AMD driver.
+- The measured numbers are one Mac and one GPU.
 
 ## Diagnostics
 

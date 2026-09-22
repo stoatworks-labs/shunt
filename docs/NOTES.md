@@ -12,9 +12,47 @@ off rendered profiles to within a pixel, the dwell measured in frames, the draw
 order measured by colour, 33 controls all live, and `oxbow` loads both bundles
 and renders 120 frames with `gl error 0x0`.
 
-**Never loaded into Resolume.** No Windows binary has been run anywhere. No
-OpenFX build. Those three are the whole of what is unverified, and they are
-stated in the README's Status rather than buried here.
+**In Resolume Arena 7.27.1 on 2026-09-22**, the shipped Windows DLLs, via the
+fleet's Arena gate on win-lab: 15 passed, 0 failed, 0 skipped. Registration,
+all 38 controls per plugin against the declarations, the four 16-character names
+complete, a rendered frame from each, a clean log. 13 and 10 controls proven live
+in-host, the rest inconclusive against the animation's own motion — see
+`AGENTS.md`. On llvmpipe, so nothing about a GPU.
+
+Still unverified: a GPU, macOS Arena, a show, a person reading the inspector,
+Bar sync against a real transport, and there is no OpenFX build. All of that is
+in the README's Status rather than buried here.
+
+## The first Arena run, 2026-09-22
+
+- The expectation was seeded from the running Arena and then reviewed against
+  `shtest --list` — name, order, type, default, range, option element — with a
+  script rather than by eye: zero discrepancies on either plugin. That review is
+  what makes a seeded file a gate rather than a snapshot of whatever shipped.
+- The mask's `Opacity` comes first in Arena. Host behaviour, not drift: Orrery
+  Mask's expectation records the same.
+- The gate takes most of an hour, nearly all of it in the per-control pass —
+  each control is mounted, moved, captured and compared over REST, and the
+  capture is a software render.
+
+## The project video, 2026-09-22
+
+Rendered, not filmed — `stoatworks-backend/video/projects/shunt/`, through the
+new `shtest --pipe` (galvo's pipe format and cue sheets, unchanged). Two passes,
+because it is two plugins: the source for the whole piece over a black stream
+that is only its clock, the mask for its one beat over Resolume's
+IntoTheGlow_02, cut together without compositing. The cue sheet is GENERATED
+from a table of what each beat IS, with a hold key at every beat's end for every
+parameter and a check that reads the sheet back through the harness's own
+interpolation rule before a frame is rendered — the two hand-written-cue traps
+that cost galvo and vertigo a re-render cannot happen. The ladder beat's claim is
+measured off the take itself: 72.00 px, worst error 0.00.
+
+Found while working out that beat's geometry: the `Presets.h` comment said
+`Count` 0.408 is twelve shapes. It is eleven — `1 + round(63 × 0.408²)` — and the
+rounding step is narrow there (0.415 is twelve). The comment is corrected; the
+preset values are unchanged, because changing one would change what an existing
+composition renders.
 
 ## Where it came from
 

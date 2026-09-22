@@ -70,7 +70,8 @@ struct Preset
 // Option values are element indices: Shape 0 Circle / 1 Square / 4 Star /
 // 6 Ring / 7 Bar; Side 0 Left / 1 Right / 2 Top / 3 Bottom; Colour mode
 // 0 White / 1 Solid / 2 Hue Spread / 3 Hue Cycle; Blend 0 Over / 1 Add /
-// 2 Max. Count is the 1..64 quadratic curve (0.333 is 8 shapes, 0.408 is 12);
+// 2 Max. Count is the 1..64 quadratic curve, 1 + round(63 v^2): 0.333 is 8
+// shapes, 0.408 is 11 and 0.415 is 12 -- the rounding step is narrow there;
 // Stretch sits at unity on 0.5; Gap is in THICKNESSES here — 0.25 of the
 // slider is exactly 1 thickness, so anything below that overlaps.
 inline constexpr Preset kPresets[] = {

@@ -274,13 +274,41 @@ reserved words**, and a shader that will not compile surfaces only at runtime, a
   colour, because against white it is arithmetically identical to Reveal and
   would pass whether or not the multiply happened.
 - **`sweep.py`** is the only thing that catches a dead control.
-- **`oxbow`** is the only thing that runs the BUNDLE rather than the class.
+- **`oxbow`** is the only thing in this repo that runs the BUNDLE rather than
+  the class.
+- **The Arena gate** (`../plugin-bench/arena/gate.sh shunt`, expectation in
+  `plugin-bench/arena/expect/shunt.json`) is the only thing that runs the
+  SHIPPED DLL in the real host. First run 2026-09-22 against v0.1.0 on win-lab:
+  15 passed, 0 failed. It is not in `verify.sh` — it needs the VM and takes the
+  best part of an hour on a software rasteriser.
 
-**Host verification is Allan's, not an agent's.** Driving the Resolume GUI from a
-session is unreliable. **Nothing in this repo has been loaded into Resolume**,
-and the two things most worth checking there are how the seven parameter groups
-land in the inspector and whether Bar sync actually locks against a real
-transport.
+### What the Arena gate can and cannot tell you about this plugin
+
+Two things about the first run that will look like problems and are not:
+
+- **On `SW Shunt Mask`, `Opacity` is the FIRST control.** Resolume hoists an
+  effect's own parameter named `Opacity` to the top of its list. Orrery Mask
+  shows exactly the same, and has shipped that way since 1.0. The expectation
+  records it, so the gate would fail if it ever stopped.
+- **Most controls come back *inconclusive*, not live: 20 of 33 on the source,
+  23 on the mask.** None dead. The gate proves a control by changing it and
+  comparing captures against a *noise floor* — how much the frame moves when
+  nothing is touched — and this plugin never stops moving at its default
+  Speed, so the floor is high (19.5 levels on the source) and a subtle control
+  at 320×240 cannot clear three times it. Freezing the train (`Speed` 0 is a
+  real stop here, unlike most of the fleet's animated plugins) looks like the
+  answer, and with the probe as it stands it is not: a control's `needs`
+  precondition is applied for the first measurement but the verdict is still
+  taken against the floor measured while animating, and the averaged second
+  pass drops the precondition altogether. That is a property of the probe, not
+  of this plugin, and it is written up there rather than worked round here.
+  `tools/sweep.py` is what shows all 33 live.
+
+**Host verification of the GUI is still Allan's, not an agent's.** Driving the
+Resolume GUI from a session is unreliable, and the gate speaks only Arena's REST
+API. The two things most worth a person's eyes are how the seven parameter
+groups read in the inspector, and whether Bar sync actually locks against a
+real transport.
 
 ---
 
