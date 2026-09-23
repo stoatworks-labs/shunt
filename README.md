@@ -42,15 +42,15 @@ bundled demos.*
 
 ## Download
 
-**[v0.1.0](https://github.com/stoatworks-labs/shunt/releases/tag/v0.1.0)** — prebuilt for macOS and Windows. Pick your platform:
+**[v0.2.0](https://github.com/stoatworks-labs/shunt/releases/tag/v0.2.0)** — prebuilt for macOS and Windows. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.1.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-macos-universal.dmg) | 422 KB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 369 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.2.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.2.0/shunt-0.2.0-macos-universal.dmg) | 1.0 MB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 645 KB |
 
 </details>
 
@@ -59,14 +59,14 @@ bundled demos.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .exe installer | [`shunt-0.1.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/shunt/releases/download/v0.1.0/shunt-0.1.0-windows-x86_64-setup.exe) | 230 KB |
-| x64 · .zip archive | [`shunt-windows-x86_64.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-windows-x86_64.zip) | 232 KB |
+| x64 · .exe installer | [`shunt-0.2.0-windows-x86_64-setup.exe`](https://github.com/stoatworks-labs/shunt/releases/download/v0.2.0/shunt-0.2.0-windows-x86_64-setup.exe) | 296 KB |
+| x64 · .zip archive | [`shunt-windows-x86_64.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-windows-x86_64.zip) | 363 KB |
 
 </details>
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/shunt/releases](https://github.com/stoatworks-labs/shunt/releases).
 
-macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
+The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
