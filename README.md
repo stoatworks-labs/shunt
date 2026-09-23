@@ -49,8 +49,8 @@ bundled demos.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.2.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.2.0/shunt-0.2.0-macos-universal.dmg) | 1.0 MB |
-| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 645 KB |
+| Universal (Apple Silicon + Intel) · .dmg disk image | [`shunt-0.2.0-macos-universal.dmg`](https://github.com/stoatworks-labs/shunt/releases/download/v0.2.0/shunt-0.2.0-macos-universal.dmg) | 766 KB |
+| Universal (Apple Silicon + Intel) · .zip archive | [`shunt-macos-universal.zip`](https://github.com/stoatworks-labs/shunt/releases/latest/download/shunt-macos-universal.zip) | 686 KB |
 
 </details>
 
@@ -66,7 +66,7 @@ bundled demos.*
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/shunt/releases](https://github.com/stoatworks-labs/shunt/releases).
 
-The Windows builds are unsigned, so SmartScreen warns once.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
