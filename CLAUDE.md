@@ -51,8 +51,10 @@ draw order or the blend state.
   VM and checks registration, the control surface the host sees, FFGL's 16-char
   name truncation, and that every control still moves the picture. Takes
   minutes, needs the VM, and is deliberately NOT in `tools/verify.sh`. Last run
-  2026-09-22 against v0.1.0: 15 passed, 0 failed — see AGENTS.md for why most
-  controls come back inconclusive rather than live.
+  2026-09-23 against the v0.2.0 Windows build, before tagging: 17 passed, 0
+  failed, 0 skipped, 50 controls per plugin, the Image fixture loaded. See
+  AGENTS.md for why most controls come back inconclusive rather than live.
+  win-lab is shared: check `pgrep -fl arenaprobe` and ask before deploying.
 
 ## Browser demo
 - `demo/` is served at `shunt-demo.stoatworks-labs.com` by this repo's own

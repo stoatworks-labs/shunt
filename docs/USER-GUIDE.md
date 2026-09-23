@@ -17,10 +17,11 @@ arriving alone, three closing up, eight standing.*
 > top. **Both plugins load and run in Resolume Arena 7.27.1**: the shipped
 > v0.1.0 Windows build was checked in a real Arena, where both register
 > correctly, every control matches what the plugin declares, and both render.
-> That run was on software rendering, so it says nothing about a GPU. The
-> controls 0.2.0 added — Lanes, Shadow, Image, and the source's Mask Mode — are
-> checked by the offline harness but have not yet been driven by a person in
-> Arena. **Try it on a spare layer first**, and please report anything that
+> The v0.2.0 build went through the same check before release: all 50 controls
+> on each plugin as declared, a picture loaded into Image from a Windows path,
+> and a clean render. Those runs were on software rendering, so they say nothing
+> about a GPU, and the controls 0.2.0 added have not yet been used in a show.
+> **Try it on a spare layer first**, and please report anything that
 > misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human

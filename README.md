@@ -7,9 +7,9 @@
 > shape actually landed, how far apart the standing ones really are, how long
 > one really stands still, and which of two overlapping shapes is really on top
 > (see [Status](#status)). Both plugins load and run in **Resolume Arena
-> 7.27.1**: the shipped v0.1.0 Windows build was checked in a real Arena on
-> 2026-09-22 — registration, every control the host reports, and a rendered frame
-> from each. That was on software rendering, and nothing here has been used in a
+> 7.27.1**: the v0.2.0 Windows build was checked in a real Arena on
+> 2026-09-23, before release — registration, all 50 controls the host reports on
+> each plugin, a picture loaded into Image, and a rendered frame from each. That was on software rendering, and nothing here has been used in a
 > show yet. Check it in your own rig before trusting it in one.
 
 Shapes slide in from an edge, bank up a set distance apart, stand, and are
@@ -361,7 +361,18 @@ build, then real frames rendered and measured:
 | Universal binary | `lipo` reports `x86_64 arm64` on both, `plugMain` exported, ad-hoc signs |
 | Render cost | **0.2–0.4 ms/frame at 720p and 1080p, 0.3–0.5 at 4K** — the same as 0.1.0 within run-to-run noise |
 
-And in Resolume itself — **for v0.1.0**. On 2026-09-22 the **shipped v0.1.0 Windows build** — the
+And in Resolume itself. **v0.2.0**, 2026-09-23: the Windows build from this
+release's own workflow — the DLLs, not a local build — went through the same
+Arena gate on win-lab before the tag was cut. **17 passed, 0 failed, 0 skipped**:
+both DLLs load and register; all **50** controls on each plugin match the
+declarations, including the twelve new ones (Columns, Rows and Sprite as real
+integer ranges); the Image control loaded a sprite sheet from a Windows path on
+both plugins; both render; clean log, one Arena process throughout. 24 of the
+source's controls and 21 of the mask's were shown to move the picture in Arena,
+11 of them each under a precondition, and the rest were inconclusive against the
+animation's own motion — none dead.
+
+**v0.1.0**, 2026-09-22 — the record that release shipped with. The **shipped v0.1.0 Windows build** — the
 DLLs from the release page, not a local build — was loaded into Resolume Arena
 7.27.1 (build 15990) on win-lab, an x64 Windows 11 VM, by the fleet's Arena
 release gate. 15 checks, all passed:
@@ -377,10 +388,10 @@ release gate. 15 checks, all passed:
 
 What that does **not** cover, and it is the important half:
 
-- **The field report came from Arena and 0.2.0 answers it, but 0.2.0's new
-  controls have been checked by the harness, not by a person in Arena.** In
-  particular, whether Resolume's file picker offers the right extensions for
-  Image, and how Columns, Rows and Sprite render in its inspector.
+- **0.2.0's new controls have been through the gate, not through a person.**
+  The gate proves they are there, typed and ranged as declared, and that the
+  Image loads a real file on Windows; it cannot say how Resolume's file picker
+  or the integer spinners feel in the inspector.
 
 - **The Arena run was on software rendering.** win-lab has no GPU — Arena runs on
   Mesa llvmpipe there — so it says nothing about an NVIDIA or AMD driver, and

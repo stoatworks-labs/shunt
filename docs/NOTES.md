@@ -53,11 +53,21 @@ displays. The second would matter far beyond this preset, so it is the first
 thing to check in a real Arena: set Outline to 0.9 by typing it, and compare
 with `shtest --set Outline=0.9`.
 
-## Status, 2026-09-22
+## Status, 2026-09-23
 
-v0.2.0 on the branch that answers the field report: `tools/verify.sh` green,
-now with `--matte`, `--lanes`, `--shadow` and `--image`, and the sweep at 47
-live parameters. Everything below is about v0.1.0.
+v0.2.0: `tools/verify.sh` green, now with `--matte`, `--lanes`, `--shadow` and
+`--image`, and the sweep at 47 live parameters. The release workflow's Windows
+build (dispatched on the branch, before the tag) went through the Arena gate:
+17 passed, 0 failed, 0 skipped — 50 controls per plugin against the updated
+`plugin-bench/arena/expect/shunt.json`, the Image fixture
+(`arena/fixtures/shunt-sheet.png`) loaded from a Windows path on both plugins,
+24 and 21 controls live, none dead. It ran on main's probe; the probe fix being
+worked on in parallel (gated controls measured under their precondition with
+Speed 0) will hold these results to a stricter standard, and it has already
+found that Angle needs a probe of [0.125, 0.25] — its range is one full turn, so
+0 and 1 are the same picture.
+
+Everything below is about v0.1.0.
 
 v0.1.0. `tools/verify.sh` green on an Apple M4 Max, macOS 26.4.1: universal
 build, both bundles export `plugMain` and ad-hoc sign, 92 slot runs tile the
