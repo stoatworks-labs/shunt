@@ -16,6 +16,20 @@ BUILD="${1:-$REPO/build-verify}"
 
 cd "$REPO"
 
+# oxbow, the FFGL test host. It sits beside this repo's checkout -- and from
+# a git worktree `..` is the worktrees folder, not Projects/resolume, so the
+# main checkout is found through git's common dir as well. OXBOW names the
+# binary outright.
+OXBOW_REPO=""
+for candidate in "$REPO/../oxbow" \
+                 "$(dirname "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")/../oxbow"; do
+	if [ -d "$candidate/build" ]; then
+		OXBOW_REPO="$candidate"
+		break
+	fi
+done
+OXBOW_REPO="${OXBOW_REPO:-$REPO/../oxbow}"
+
 step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$1"; exit 1; }
 
@@ -216,7 +230,7 @@ step "In a real FFGL host"
 #
 # Optional, because it lives in a sibling repo -- but its absence is reported
 # rather than passed over in silence.
-OXBOW="${OXBOW:-$HOME/Projects/resolume/oxbow/build/oxbow}"
+OXBOW="${OXBOW:-$OXBOW_REPO/build/oxbow}"
 if [[ -x "$OXBOW" ]]; then
 	for name in "Shunt" "Shunt Mask"; do
 		"$OXBOW" probe "$BUILD/$name.bundle" || fail "$name: oxbow could not probe it"
