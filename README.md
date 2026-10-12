@@ -1,41 +1,37 @@
 # Shunt
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
-> (Anthropic), directed and reviewed by a human author. The queue is verified
-> numerically by an offline harness that drives the real plugin class in a
-> headless GL context: it renders frames and measures, in pixels, where every
-> shape actually landed, how far apart the standing ones really are, how long
-> one really stands still, and which of two overlapping shapes is really on top
-> (see [Status](#status)). Both plugins load and run in **Resolume Arena
-> 7.27.1**: the v0.2.0 Windows build was checked in a real Arena on
-> 2026-09-23, before release — registration, all 50 controls the host reports on
-> each plugin, a picture loaded into Image, and a rendered frame from each. That was on software rendering, and nothing here has been used in a
-> show yet. Check it in your own rig before trusting it in one.
+> (Anthropic), directed and reviewed by a human author. Both plugins load and run in
+> **Resolume Arena 7.27.1**: the v0.2.0 Windows build went through a real Arena on 2026-09-23,
+> before release, on software rendering. Everything else is measured by an offline harness that
+> drives the real plugin code without a host and checks, in pixels, where the shapes land, how
+> far apart they stand, how long they stand still and which one's on top. Nothing here has been
+> used in a show yet, so check it in your own rig before you trust it in one. The full rundown is
+> under [Status](#status).
 
-Shapes slide in from an edge, bank up a set distance apart, stand, and are
-drawn away again — for [Resolume](https://resolume.com) Arena and Avenue, as a
-pair of FFGL plugins. For animated masks, and for chroma animations driving a
-pixel map.
+Shapes slide in from an edge, bank up a set distance apart, stand for a moment and then get
+drawn off again, a bit like wagons in a siding. It's a pair of FFGL plugins for
+[Resolume](https://resolume.com) Arena and Avenue, for animated masks and for chroma
+animations driving a pixel map.
 
 ![Twelve shaded discs banked up against the head of the queue, hue spread along the train](docs/hero.png)
 
-<sub>Twelve discs from the left, overlapping by a third of their own thickness,
-hue spread along the train — one arriving alone, three closing up, eight
-standing. Rendered by `shtest`, the offline harness.</sub>
+<sub>Twelve discs in from the left, overlapping by a third of their own thickness, with the
+hue spread along the train: one arriving on its own, three closing up and eight standing.
+Rendered by `shtest`, the offline harness.</sub>
 
-**[Try it in your browser](https://shunt-demo.stoatworks-labs.com/)** — both
-plugins' own shaders in WebGL2 over a port of the queue, every control and all
-seven presets, no install.
+**[Try it in your browser](https://shunt-demo.stoatworks-labs.com/)**: both plugins' own
+shaders in WebGL2 over a port of the queue, with every control and all seven presets, and
+nothing to install.
 
 [![Shunt — shapes that queue up and bank up, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=m0wPwxjA5ls)
 
-*[Watch it](https://www.youtube.com/watch?v=m0wPwxjA5ls) — 50 seconds: the
-caterpillar forming, newest on top, Dwell swept from one end of the dial to the
-other, a ladder whose 72-pixel gap was measured off the take at 72.00, the mask
-cutting the train into a clip, and the close from the other edge. Every frame is
-the real plugin's output: an FFGL plugin has no window, so the footage is
-rendered by this repository's own harness (`shtest --pipe`, driven by a cue
-sheet) rather than filmed off a screen. The clip is one of Resolume's own
+*[Watch it](https://www.youtube.com/watch?v=m0wPwxjA5ls) (50 seconds): the caterpillar
+forming with the newest on top, Dwell swept from one end of the dial to the other, a ladder
+whose 72-pixel gap was measured off the take at 72.00, the mask cutting the train into a clip,
+and the close from the other edge. It's all the plugin's own output. An FFGL plugin doesn't
+have a window to film, so the footage comes from this repo's own harness (`shtest --pipe`,
+driven by a cue sheet) rather than a screen recording. The clip is one of Resolume's own
 bundled demos.*
 
 <!-- downloads:start -->
@@ -72,22 +68,20 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 ## Where it came from
 
-This is not an idea that arrived from inside the workshop. A Resolume operator
-described it: pick a shape, pick an edge, and it slides in that far and stops
-for a moment. The next one comes in behind it and stops a set distance back.
-They bank up, overlapping, until the first one's wait is over and it carries on
-off the far side — and then the next, and the next. *Like a caterpillar made of
-shapes*, in their words.
+I didn't come up with this one. A Resolume operator described it: pick a shape, pick an edge,
+and it slides in that far and stops for a moment. The next one comes in behind it and stops a
+set distance back. They bank up, overlapping, until the first one's wait is over and it carries
+on off the far side, then the next, and the next. *Like a caterpillar made of shapes*, in their
+words.
 
-Everything below is downstream of that description, including the two decisions
-it did not settle: which of two overlapping shapes is on top, and what happens
-when the queue is emptying from the front while it is still filling from the
-back.
+Everything below grows out of that description, including the two things it left open: which
+of two overlapping shapes is on top, and what happens when the queue's emptying from the front
+while it's still filling from the back.
 
 ## What 0.2.0 added, from the first night in a real rig
 
-The operator who asked for it had it running within hours of 0.1.0 and sent
-back six notes. All six are in 0.2.0:
+The operator who asked for it had it running within hours of 0.1.0 and sent back six notes.
+All six made it into 0.2.0:
 
 | They said | What it is now |
 | --- | --- |
@@ -98,12 +92,11 @@ back six notes. All six are in 0.2.0:
 | *"load an image … a folder of images … a sprite sheet"* | **Image**, with **Image From** Single / Folder / Sprite Sheet and **Pick** Same / Random / In Order. [Pictures on the shapes](#pictures-on-the-shapes) |
 | *"Ring with 0.9 outline and 0.56 roundness makes a weird thing that I like"* | That look is now the **Bullseye** preset. |
 
-Nothing old moved: every control 0.1.0 had keeps its id, the new ones are
-declared after them, and each new one defaults to off — a 0.1.0 composition
-opens looking as it did. One thing does look different: **the shading's light is
-now fixed on the screen**. In 0.1.0 it turned with each shape, so a train coming
-in from the top was lit from the side; with a drop shadow cast from the same
-Light control, that would have been visible at once.
+Nothing old has moved. Every control 0.1.0 had keeps its id, the new ones are declared after
+them, and each new one defaults to off, so a 0.1.0 composition opens looking the way it did.
+One thing does look different: **the shading's light is now fixed on the screen**. In 0.1.0 it
+turned with each shape, so a train coming in from the top was lit from the side, and with a
+drop shadow cast from the same Light control that would've been obvious straight away.
 
 ## Two plugins
 
@@ -112,102 +105,97 @@ Light control, that would have been visible at once.
 | **SW Shunt** | A generator. The train over its own background. |
 | **SW Shunt Mask** | An effect. The same train over — or cut into — the incoming clip. |
 
-FFGL resolves one `plugMain` per binary, so a source and an effect are two
-bundles rather than one bundle with two entries. Both ship together.
+FFGL resolves one `plugMain` per binary, so a source and an effect have to be two bundles
+rather than one bundle with two entries. They ship together.
 
 ## Dwell is one dial, not two modes
 
-The part that needed deciding was what happens when the queue is emptying from
-the front while it is still filling from the back. It would have been easy to
-ship that as two modes — *stack up, then release* and *keep moving* — and it
-would have been wrong, because they are the same mechanism at two ends of one
-slider:
+The bit that needed deciding was what happens when the queue's emptying from the front while
+it's still filling from the back. It would've been easy to ship that as two modes, *stack up,
+then release* and *keep moving*, but that would have been wrong, because they're the same
+mechanism at either end of one slider:
 
 | Dwell | What you see |
 |---|---|
 | **Low** | Shapes cross slowly. The head is still leaving as the fourth one arrives; the train never stands complete. |
 | **High** | Shapes cross fast. The whole train is standing before the head moves at all, then it peels off one at a time. |
 
-Everything in between is reachable, and **nothing in the code branches on it**.
-The harness measures both ends: at Dwell 10% there is no phase at which the
-whole train stands and there is always one shape leaving while another arrives;
-at 90% it is the other way round.
+You can get anywhere in between, and nothing in the code branches on it. The harness measures
+both ends: at Dwell 10% there's no phase where the whole train is standing, and there's always
+one shape leaving while another arrives. At 90% it's the other way round.
 
 ## The gap, in both units
 
-The spacing between standing shapes is offerable two ways, because neither
-substitutes for the other:
+You can set the spacing between standing shapes two ways, because neither one can do the
+other's job:
 
-- **Thickness** — a multiple of the shape's own extent *along the direction of
-  travel*. At exactly 1 they stand edge to edge; below it the leading edge of
-  each one overlaps the trailing edge of the one in front, which is what makes
-  a caterpillar rather than a row. Change Size and the train still looks right.
-- **Pixels** — an absolute count, measured along the direction of travel. This
-  is the one for a pixel map: a 64-pixel gap measures **64.00 px at 1080p and
-  64.00 px at 720p**, so it lands on a fixture pitch instead of near it.
+- **Thickness**: a multiple of the shape's own extent *along the direction of travel*. At
+  exactly 1 they stand edge to edge. Below that, each one's leading edge overlaps the trailing
+  edge of the one in front, which is what turns a row into a caterpillar. Change Size and the
+  train still looks right.
+- **Pixels**: an absolute count, measured along the direction of travel. This is the one for a
+  pixel map. A 64-pixel gap measures 64.00 px at 1080p and 64.00 px at 720p, so it lands on a
+  fixture pitch rather than somewhere near it.
 
 ## Newest on top
 
-The shape that arrived most recently is drawn over the ones in front of it, so
-a shape sliding in passes *over* the standing queue. The draw order rotates as
-the phase advances, because which slot is newest turns over once per release —
-a fixed order would look right for one frame in eight and wrong for the rest.
+The shape that arrived most recently is drawn over the ones in front of it, so a shape sliding
+in passes *over* the standing queue. The draw order rotates as the phase moves on, because
+which slot is newest turns over once per release. A fixed order would look right for one frame
+in eight and wrong for the rest.
 
-`Blend` **Max** is the exception, and deliberately: channel-wise maximum is
-commutative, so under it there is no "on top" at all. That is the right trade
-for a mask, where two overlapping white shapes should stay white, and the wrong
-one for a caterpillar — which is why **Over** is the default.
+`Blend` **Max** is the exception, on purpose. A channel-wise maximum is commutative, so under
+it there's no "on top" at all. That's the right trade for a mask, where two overlapping white
+shapes should stay white, and the wrong one for a caterpillar, which is why **Over** is the
+default.
 
 ## Why the procession never drifts
 
-A shape's place is a **pure function of (slot, phase)**. There is no queue
-object that shapes are pushed onto and popped off, no "has the one in front
-left yet?" test, no previous frame. Nothing is integrated, so nothing
-accumulates error and nothing slows down when the show gets heavy — which
-matters when the output is driving a lighting rig rather than a screen.
+A shape's place is a pure function of (slot, phase). There's no queue object that shapes get
+pushed onto and popped off, and no "has the one in front left yet?" test. It doesn't even look
+at the previous frame. Nothing's integrated, so no error builds up and nothing slows down when
+the show gets heavy, which matters when the output's driving a lighting rig rather than a
+screen.
 
-What makes that possible is one choice: the slide speed is **derived**, not set.
-Picking it as `(1 + 2·margin) / (1 − Dwell)` makes every shape's run exactly one
-cycle long *whatever slot it stands at*, because a shape that stands near the
-back has a short run in and a correspondingly long run out. So `Count` shapes
-released one per `1/Count` of a cycle tile the cycle exactly: always that many
-in play, never a hole in the procession, and never two shapes wanting one slot.
+That all hangs on one choice: the slide speed is worked out from the other settings rather
+than set. Making it `(1 + 2·margin) / (1 − Dwell)` makes every shape's run one cycle long
+*whatever slot it stands at*, because a shape that stands near the back has a short run in and
+a long run out to match. So `Count` shapes released one per `1/Count` of a cycle tile the cycle
+with nothing left over: there are always that many in play, there's never a hole in the
+procession, and two shapes never want the same slot.
 
-The same property is why beat sync costs nothing extra: phase is just a number,
-so `Sync` swaps the host clock for the host's bar position and the whole train
-locks to the track with no separate code path. Set it to `Manual` and the Phase
-parameter becomes the only driver — hand it to Resolume's own BPM-synced
-animation, a keyframe, or a MIDI fader.
+It's also why beat sync comes free. Phase is just a number, so `Sync` swaps the host clock for
+the host's bar position and the whole train locks to the track with no separate code path. Set
+it to `Manual` and the Phase parameter is the only thing driving it, so you can hand it to
+Resolume's own BPM-synced animation, a keyframe or a MIDI fader.
 
 ## Shapes
 
 ![The eight primitives](docs/shapes.png)
 
-Circle, Square, Triangle, Hexagon, Star, Cross, Ring, Bar — each with
-**Stretch**, **Angle**, **Roundness**, **Outline**, **Softness** and **Shade**.
-**Bar** is the "line" of the original request; stretch it and turn it a quarter
-turn and it is a rung across the train.
+Circle, Square, Triangle, Hexagon, Star, Cross, Ring and Bar, each with **Stretch**,
+**Angle**, **Roundness**, **Outline**, **Softness** and **Shade**. **Bar** is the "line" from
+the original request: stretch it, turn it a quarter turn and it's a rung across the train.
 
-**Angle is measured from the direction of travel**, not from the frame. A Bar at
-0° is a dash pointing the way it is going and at 90° it is a rung — and changing
-which edge the train comes in from does not make you re-dial it.
+**Angle** is measured from the direction of travel, not from the frame. A Bar at 0° is a dash
+pointing the way it's going and at 90° it's a rung, and changing which edge the train comes in
+from doesn't make you dial it in again.
 
-`Softness` at zero gives a hard edge, which is what you want for pixel mapping:
-a feathered edge means a fixture sitting on the boundary reads a
-half-brightness colour that was never in the design.
+`Softness` at zero gives a hard edge, which is what you want for pixel mapping. With a
+feathered edge, a fixture sitting on the boundary reads a half-brightness colour that was
+never in the design.
 
-Note that the gap in **Thickness** units is measured on the shape as it is
-actually drawn — so the same setting gives a tight train of bars and a wide one
-of discs, which is the sheet above.
+The gap in **Thickness** units is measured on the shape as it's actually drawn, so the same
+setting gives a tight train of bars and a wide one of discs. That's the sheet above.
 
 ## Sides
 
 ![The four entry sides](docs/sides.png)
 
-**Left**, **Right**, **Top**, **Bottom**. `Travel` and a pixel `Gap` are both
-measured along the direction of travel, so the numbers mean the same thing
-whichever you pick. `Across` puts the run where you want it on the other axis,
-and reaches past both edges so two instances can be layered.
+**Left**, **Right**, **Top** and **Bottom**. `Travel` and a pixel `Gap` are both measured
+along the direction of travel, so the numbers mean the same thing whichever you pick. `Across`
+puts the run wherever you want it on the other axis, and reaches past both edges so you can
+layer two instances.
 
 ## Output
 
@@ -222,15 +210,15 @@ and reaches past both edges so two instances can be layered.
 | **Hide** | The clip shows **everywhere except** the shapes. |
 | **Colourise** | The clip, tinted by the shape colour, inside the shapes. |
 
-Colourise needs a **Colour Mode** other than White to do anything visible —
-against a white shape colour it is arithmetically identical to Reveal.
+Colourise needs a **Colour Mode** other than White to do anything you can see. Against a white
+shape colour it's arithmetically identical to Reveal.
 
 **Mix** fades the effect against the untouched clip.
 
 ### In `SW Shunt`: a matte
 
-The source has no clip to mask, so the same **Mask Mode** control draws a matte
-for another layer to key against:
+The source hasn't got a clip to mask, so the same **Mask Mode** control draws a matte for
+another layer to key against:
 
 | Mode | Result |
 | --- | --- |
@@ -238,20 +226,19 @@ for another layer to key against:
 | **Matte** | White shapes on opaque black — whatever the colour, shading, Blend or shadow say. |
 | **Inverse Matte** | Black shapes on opaque white. |
 
-Coverage, opacity, Softness and a picture's alpha all still apply, so a soft edge
-is a soft edge in the matte too. **Mix** fades the source's whole output to
-transparent — as one picture, through the blend's constant factor, so overlapping
-shapes fade exactly as much as the background behind them.
+Coverage, opacity, Softness and a picture's alpha all still apply, so a soft edge is a soft
+edge in the matte too. **Mix** fades the source's whole output to transparent as one picture,
+through the blend's constant factor, so overlapping shapes fade by just as much as the
+background behind them.
 
-The element values line up with the effect's — Reveal is Matte, Hide is Inverse
-Matte — so a composition moved from one plugin to the other lands on the
-corresponding mode.
+The element values line up with the effect's (Reveal is Matte, Hide is Inverse Matte), so a
+composition moved from one plugin to the other lands on the matching mode.
 
 ## Lanes
 
-A **set** is one cycle's worth of shapes — `Count` of them. With **Lanes** off,
-every set runs along `Across`, and at settings where the next set arrives while
-the last is still standing, the two run straight through each other.
+A **set** is one cycle's worth of shapes, `Count` of them. With **Lanes** off, every set runs
+along `Across`, and at settings where the next set arrives while the last one's still
+standing, the two run straight through each other.
 
 | Lanes | Each new set |
 | --- | --- |
@@ -259,34 +246,31 @@ the last is still standing, the two run straight through each other.
 | **Step** | `Lane Step` further across than the last — −50% to +50% of the frame — rolling over from one edge to the other |
 | **Random** | on a random lane, never closer to the last set than one shape's own width |
 
-Both wrap inside the band where a whole shape stays on the frame, so rolling
-over puts the shape fully back on rather than half off the far edge.
+Both wrap inside the band where a whole shape stays on the frame, so rolling over puts the
+shape fully back on rather than half off the far edge.
 
-There is still no state. A shape's set is `floor( phase − slot / Count )`, and
-its lane is a function of that number — Random included: each set moves half
-the band plus a jitter of at most `½ − s` either way, where `s` is the shape's
-width as a share of the band, so two consecutive sets are always between `s`
-and `1 − s` apart round the wrap. A random walk would have been a running sum,
-which is state. A set changes lane only at the instant its shape is released
-from off-stage, where nobody can see it.
+There's still no state. A shape's set is `floor( phase − slot / Count )`, and its lane is a
+function of that number, Random included. Each set moves half the band plus a jitter of at
+most `½ − s` either way, where `s` is the shape's width as a share of the band, so two sets in
+a row are always between `s` and `1 − s` apart round the wrap. A random walk would have been a
+running sum, which is state. A set only changes lane at the instant its shape is released from
+off-stage, where nobody can see it.
 
 ## Shadows
 
 ![Shaded discs in a hue spread, each casting a soft shadow down onto the grey background and onto the disc it has slid over](docs/shadows.png)
 
-**Shadow** is the opacity, **Shadow Distance** the offset in multiples of the
-shape's radius, **Shadow Blur** the feather. They fall away from the **Light**
-control in the Shading group — the same light the shading uses, so the
-highlight and the shadow agree.
+**Shadow** is the opacity, **Shadow Distance** the offset in multiples of the shape's radius
+and **Shadow Blur** the feather. They fall away from the **Light** control in the Shading
+group, which is the same light the shading uses, so the highlight and the shadow agree.
 
-Each shadow is drawn in the same instanced draw as its shape, immediately
-before it — two instances per shape — so a shadow falls on the older shapes the
-new one has slid over and never on its own shape. Drawing all the shadows first
-would put every shadow under every shape, and the overlap this plugin is about
-would lose its depth.
+Each shadow is drawn in the same instanced draw as its shape, just before it (two instances
+per shape), so a shadow falls on the older shapes the new one has slid over and never on its
+own shape. Drawing all the shadows first would put every shadow under every shape, and the
+overlap this whole plugin is about would go flat.
 
-No shadows in **Hide**, whose blend would punch them out of the clip as a
-second, offset set of holes, and none in a **matte**.
+There are no shadows in **Hide**, whose blend would punch them out of the clip as a second,
+offset set of holes, and none in a **matte**.
 
 ## Pictures on the shapes
 
@@ -300,21 +284,19 @@ second, offset set of holes, and none in a **matte**.
 | **Folder** | every image in the chosen file's folder — sorted by name, up to 36 — one per shape |
 | **Sprite Sheet** | the picture cut into **Columns** × **Rows** |
 
-**Pick** says which each shape gets: **Same** (the one **Sprite** names — it
-wraps past the end), **Random** (its own, chosen when it is released) or **In
-Order** (the next along from the shape before, starting at Sprite). A shape
-keeps its picture for its whole run. **Image Mix** blends the picture against
-the shape's own colour; the colour tints the picture, so White leaves it as it
-is.
+**Pick** says which one each shape gets: **Same** (the one **Sprite** names, wrapping past the
+end), **Random** (its own, chosen when it's released) or **In Order** (the next one along from
+the shape before, starting at Sprite). A shape keeps its picture for its whole run. **Image
+Mix** blends the picture against the shape's own colour. The colour tints the picture, so
+White leaves it as it is.
 
-Each picture is cropped to its largest centred square, because a shape is drawn
-over a square: a 16:9 photo on a circle is a circle of the middle of the photo,
-not an ellipse of all of it. The picture turns with **Angle** and not with the
-entry side, so it stays upright whichever edge the train comes in from.
+Each picture is cropped to its largest centred square, because a shape is drawn over a square:
+a 16:9 photo on a circle comes out as a circle cut from the middle of the photo, not an
+ellipse of the whole thing. The picture turns with **Angle** and not with the entry side, so
+it stays upright whichever edge the train comes in from.
 
-Columns, Rows and Sprite are integer controls you can type a number into — a
-sprite sheet is somebody else's grid, and a slider that lands either side of 5
-is no way to read one.
+Columns, Rows and Sprite are integer controls you can type a number into. A sprite sheet is
+somebody else's grid, and a slider that keeps landing either side of 5 is no way to read one.
 
 ## Build
 
@@ -329,15 +311,15 @@ cmake --install build      # straight into Resolume's plugin folder
 Needs CMake 3.15+ and a C++17 compiler. The Resolume FFGL SDK comes in as a
 submodule; on Windows, GLEW comes from vcpkg.
 
-Both plugins are in every download — drop them into
+Both plugins are in every download. Drop them into
 `~/Documents/Resolume Arena/Extra Effects` (or the Avenue equivalent) and
 restart Resolume.
 
 ## Status
 
-**v0.2.0, and honestly early.** Everything in the first table is measured by
-`tools/verify.sh` on an Apple M4 Max, macOS 26.4.1 — a fresh universal Release
-build, then real frames rendered and measured:
+**v0.2.0, and still early days.** Everything in the first table is measured by
+`tools/verify.sh` on an Apple M4 Max running macOS 26.4.1: a fresh universal Release build,
+then actual frames rendered and measured:
 
 | Check | What it proves |
 | --- | --- |
@@ -361,21 +343,20 @@ build, then real frames rendered and measured:
 | Universal binary | `lipo` reports `x86_64 arm64` on both, `plugMain` exported, ad-hoc signs |
 | Render cost | **0.2–0.4 ms/frame at 720p and 1080p, 0.3–0.5 at 4K** — the same as 0.1.0 within run-to-run noise |
 
-And in Resolume itself. **v0.2.0**, 2026-09-23: the Windows build from this
-release's own workflow — the DLLs, not a local build — went through the same
-Arena gate on win-lab before the tag was cut. **17 passed, 0 failed, 0 skipped**:
-both DLLs load and register; all **50** controls on each plugin match the
-declarations, including the twelve new ones (Columns, Rows and Sprite as real
-integer ranges); the Image control loaded a sprite sheet from a Windows path on
-both plugins; both render; clean log, one Arena process throughout. 24 of the
-source's controls and 21 of the mask's were shown to move the picture in Arena,
-11 of them each under a precondition, and the rest were inconclusive against the
-animation's own motion — none dead.
+And in Resolume itself. **v0.2.0**, 2026-09-23: the Windows build from this release's own
+workflow (the DLLs, not a local build) went through the same Arena gate on win-lab before the
+tag was cut. 17 passed, 0 failed, 0 skipped. Both DLLs load and register; all 50 controls on
+each plugin match the declarations, including the twelve new ones (Columns, Rows and Sprite
+as true integer ranges); the Image control loaded a sprite sheet from a Windows path on both
+plugins; both render; and the log stayed clean, with one Arena process throughout. 24 of the
+source's controls and 21 of the mask's were shown to move the picture in Arena, 11 of them
+each under a precondition, and the rest were inconclusive against the animation's own motion.
+None were dead.
 
-**v0.1.0**, 2026-09-22 — the record that release shipped with. The **shipped v0.1.0 Windows build** — the
-DLLs from the release page, not a local build — was loaded into Resolume Arena
-7.27.1 (build 15990) on win-lab, an x64 Windows 11 VM, by the fleet's Arena
-release gate. 15 checks, all passed:
+**v0.1.0**, 2026-09-22 (the record as that release shipped it). The shipped v0.1.0 Windows
+build (the DLLs from the release page, not a local build) was loaded into Resolume Arena
+7.27.1 (build 15990) on win-lab, an x64 Windows 11 VM, by the fleet's Arena release gate. 15
+checks, all passed:
 
 | Check | Result |
 | --- | --- |
@@ -386,30 +367,27 @@ release gate. 15 checks, all passed:
 | Controls | none dead. **13** of the source's controls and **10** of the mask's were shown to move the picture in Arena; the rest were *inconclusive*, not dead — the train never stops moving at the default Speed, and a subtle control's effect cannot be separated from that motion at the gate's 320×240. `tools/sweep.py` shows all 33 live offline |
 | Clean | no shader or error lines in Arena's log for the run, and Arena survived it on one process |
 
-What that does **not** cover, and it is the important half:
+What that **doesn't** cover, which is the more important half:
 
-- **0.2.0's new controls have been through the gate, not through a person.**
-  The gate proves they are there, typed and ranged as declared, and that the
-  Image loads a real file on Windows; it cannot say how Resolume's file picker
-  or the integer spinners feel in the inspector.
+- **0.2.0's new controls have been through the gate, but not through a person.**
+  The gate proves they're there, typed and ranged as declared, and that Image loads an
+  actual file on Windows. It can't tell you how Resolume's file picker or the integer
+  spinners feel in the inspector.
 
-- **The Arena run was on software rendering.** win-lab has no GPU — Arena runs on
-  Mesa llvmpipe there — so it says nothing about an NVIDIA or AMD driver, and
-  nothing about speed.
-- **It has not been used in a show, or on macOS in Arena.** How the seven
-  parameter groups read in the inspector has not been reviewed by a person, and
-  whether `Bar` sync locks against a real transport still needs a real
-  transport.
-- **No OpenFX build.** The effect would port — the queue is plain C++ and the
-  per-pixel work is eight distance functions — but it is not done, so there is
-  nothing here for Resolve, Nuke or Vegas.
-- The measured numbers are one Mac and one GPU.
+- **The Arena run was on software rendering.** win-lab hasn't got a GPU (Arena runs on Mesa
+  llvmpipe there), so it says nothing about an NVIDIA or AMD driver, or about speed.
+- **It hasn't been used in a show, or in Arena on macOS.** Nobody has looked at how the seven
+  parameter groups read in the inspector yet, and finding out whether `Bar` sync locks to a
+  real transport still needs a real transport.
+- **No OpenFX build.** The effect would port (the queue is plain C++ and the per-pixel work is
+  eight distance functions), but I haven't done it, so there's nothing here for Resolve, Nuke
+  or Vegas.
+- The measured numbers come from one Mac and one GPU.
 
 ## Diagnostics
 
-A shader that will not compile looks, from the outside, exactly like a plugin
-that does nothing — and so does an Image that would not load. If that happens,
-the log says which file, and why:
+From the outside, a shader that won't compile looks just like a plugin that does nothing, and
+so does an Image that wouldn't load. If that happens, the log tells you which file and why:
 
     ~/Library/Logs/shunt/shunt.YYYY-MM-DD.log
 
@@ -425,4 +403,4 @@ The distance functions are the standard analytic forms derived and published by
 [Inigo Quilez](https://iquilezles.org/articles/distfunctions2d/); the shape
 primitives, their normalisation and the shading come from this fleet's
 [orrery](https://github.com/stoatworks-labs/orrery), and everything else here
-is ours.
+is mine.
