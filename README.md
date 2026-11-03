@@ -14,6 +14,8 @@ drawn off again, a bit like wagons in a siding. It's a pair of FFGL plugins for
 [Resolume](https://resolume.com) Arena and Avenue, for animated masks and for chroma
 animations driving a pixel map.
 
+The [project page](https://stoatworks-labs.com/software/shunt/) has the downloads, the [user guide](https://stoatworks-labs.com/software/shunt/guide/) and the video.
+
 ![Twelve shaded discs banked up against the head of the queue, hue spread along the train](docs/hero.png)
 
 <sub>Twelve discs in from the left, overlapping by a third of their own thickness, with the
